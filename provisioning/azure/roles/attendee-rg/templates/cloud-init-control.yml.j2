@@ -7,11 +7,15 @@
 # and bakes the result into the image.
 #
 # Goals:
-#   1. Install Ansible (system package, not pip — pip on Ubuntu is a mess)
-#   2. Install Python deps for the azure.azcollection and pywinrm
-#   3. Clone the workshop repo into /home/{{ attendee_ssh_username }}/workshop
-#   4. Set ownership so the attendee can edit files
-#   5. Pre-install ansible-galaxy collections that the workshop needs
+#   1. Install ansible-core via pip (apt gives 2.10.8 which is too old for
+#      the workshop's pinned collections — they need ansible-core 2.14+)
+#   2. Install Python deps for pywinrm
+#   3. Generate an SSH keypair and push it to the lab hosts so Ansible can
+#      connect from control → web1/web2 without password prompts
+#   4. Clone the workshop repo into /home/{{ attendee_ssh_username }}/workshop
+#   5. Set ownership so the attendee can edit files
+#   6. Pre-install ansible-galaxy collections that the workshop needs
+#   7. Create .vault-pass from the example so ansible.cfg doesn't break
 #
 # Anything that would require running playbooks against the lab itself goes in
 # the workshop's own preflight/check.yml playbook, NOT here. Cloud-init is for
@@ -31,7 +35,7 @@ packages:
   - nano
   - tmux
   - htop
-  - sshpass        # used by some Ansible modules and the workshop's lab guides
+  - sshpass        # needed for ssh-copy-id to web1/web2 during bootstrap
 
 write_files:
   # A small README in the attendee's home directory pointing them at the workshop
@@ -70,11 +74,6 @@ write_files:
   # name (web1, web2, mgmt1) and relies on /etc/hosts to resolve them to the
   # per-attendee private IPs (10.<attendee_number>.0.X). Without these entries,
   # every Ansible task targeting web1/web2/mgmt1 would fail with a DNS error.
-  #
-  # Appended to /etc/hosts via the append_hosts directive below, not written
-  # as a standalone file, because cloud-init's write_files would clobber the
-  # default Ubuntu /etc/hosts entries (localhost, etc.) if we wrote the
-  # whole file here.
   - path: /etc/hosts.workshop-additions
     permissions: '0644'
     content: |
@@ -85,44 +84,69 @@ write_files:
       {{ host_private_ips.mgmt1 }}  mgmt1
 
 runcmd:
-  # Install pywinrm so the workshop's playbooks can talk to the Windows host.
-  # We use pip with --break-system-packages because Ubuntu 22.04+ marks the
-  # system Python as externally managed. This is the lab; production should
-  # use a venv.
-  - pip3 install --break-system-packages "pywinrm[kerberos]" requests
-  - pip3 install ansible-core --break-system-packages || pip3 install ansible-core
+  # -------------------------------------------------------------------------
+  # Step 1: Append /etc/hosts entries FIRST — everything below needs name
+  # resolution to work (ssh-copy-id to web1/web2 uses these names).
+  # -------------------------------------------------------------------------
+  - cat /etc/hosts.workshop-additions >> /etc/hosts
 
-  # Install the workshop's required Galaxy collections from requirements.yml.
-  # The requirements file is the canonical source of truth for which
-  # collections (and which versions) the workshop needs. See requirements.yml
-  # at the repo root for the full list and rationale.
-  #
-  # Note: we clone the repo first (next runcmd block), then install collections
-  # from the requirements.yml file inside the clone. This ordering is important
-  # — running this collection install before the clone would fail because
-  # requirements.yml wouldn't exist yet.
+  # -------------------------------------------------------------------------
+  # Step 2: Install ansible-core and pywinrm via pip.
+  # The apt 'ansible' package on Ubuntu 22.04 gives 2.10.8 (from 2021),
+  # which is too old for the workshop's pinned collections. pip gives us
+  # a current version (2.16+).
+  # --break-system-packages is needed on Ubuntu 22.04+ due to PEP 668.
+  # The fallback without the flag handles older pip versions.
+  # -------------------------------------------------------------------------
+  - pip3 install ansible-core --break-system-packages || pip3 install ansible-core
+  - pip3 install "pywinrm[kerberos]" requests --break-system-packages || pip3 install "pywinrm[kerberos]" requests
+
+  # -------------------------------------------------------------------------
+  # Step 3: Fix home directory ownership BEFORE doing anything as the
+  # attendee user. The pip installs above run as root and create cache
+  # files inside /home/attendee/ that change ownership. Without this
+  # chown, the git clone and ansible-galaxy steps below fail with
+  # "Permission denied."
+  # -------------------------------------------------------------------------
+  - chown -R {{ attendee_ssh_username }}:{{ attendee_ssh_username }} /home/{{ attendee_ssh_username }}
+
+  # -------------------------------------------------------------------------
+  # Step 4: Generate an SSH keypair for the attendee and push it to
+  # web1 and web2 so Ansible can connect without password prompts.
+  # sshpass feeds the generated SSH password non-interactively.
+  # The -o StrictHostKeyChecking=no avoids the first-connect prompt.
+  # -------------------------------------------------------------------------
+  - sudo -u {{ attendee_ssh_username }} ssh-keygen -t ed25519 -f /home/{{ attendee_ssh_username }}/.ssh/id_ed25519 -N "" -q
+  - sshpass -p "{{ generated_ssh_password }}" ssh-copy-id -o StrictHostKeyChecking=no -i /home/{{ attendee_ssh_username }}/.ssh/id_ed25519.pub {{ attendee_ssh_username }}@web1
+  - sshpass -p "{{ generated_ssh_password }}" ssh-copy-id -o StrictHostKeyChecking=no -i /home/{{ attendee_ssh_username }}/.ssh/id_ed25519.pub {{ attendee_ssh_username }}@web2
+
+  # -------------------------------------------------------------------------
+  # Step 5: Clone the workshop repo and install Galaxy collections.
+  # The repo must be PUBLIC on GitHub for this to work.
+  # -------------------------------------------------------------------------
   - sudo -u {{ attendee_ssh_username }} git clone --branch {{ workshop_repo_branch }} {{ workshop_repo_url }} /home/{{ attendee_ssh_username }}/workshop
   - sudo -u {{ attendee_ssh_username }} ansible-galaxy collection install -r /home/{{ attendee_ssh_username }}/workshop/requirements.yml
 
-  # Make sure the workshop directory is owned correctly even if anything above
-  # ran as root by mistake.
-  # Fix home directory ownership — earlier runcmd steps run as root and can
-  # create files owned by root inside the attendee's home directory.
-  - chown -R {{ attendee_ssh_username }}:{{ attendee_ssh_username }} /home/{{ attendee_ssh_username }}
-
-  # Create the vault password file from the example so ansible.cfg's
-  # vault_password_file reference doesn't break preflight.
+  # -------------------------------------------------------------------------
+  # Step 6: Create .vault-pass from the example. ansible.cfg references
+  # vault_password_file = .vault-pass, and without it every playbook run
+  # (including preflight) fails immediately.
+  # -------------------------------------------------------------------------
   - sudo -u {{ attendee_ssh_username }} cp /home/{{ attendee_ssh_username }}/workshop/.vault-pass.example /home/{{ attendee_ssh_username }}/workshop/.vault-pass
 
-  # Append the workshop's lab host entries to /etc/hosts so the workshop
-  # inventory's short hostnames (web1, web2, mgmt1) resolve correctly.
-  - cat /etc/hosts.workshop-additions >> /etc/hosts
+  # -------------------------------------------------------------------------
+  # Step 7: Final ownership sweep. Belt-and-suspenders — catches anything
+  # that leaked root ownership during the steps above.
+  # -------------------------------------------------------------------------
+  - chown -R {{ attendee_ssh_username }}:{{ attendee_ssh_username }} /home/{{ attendee_ssh_username }}
 
-  # Drop a marker file so the preflight playbook can confirm cloud-init finished.
+  # -------------------------------------------------------------------------
+  # Step 8: Drop a marker so the preflight playbook can confirm cloud-init
+  # finished successfully.
+  # -------------------------------------------------------------------------
   - touch /var/lib/cloud/instance/workshop-bootstrap-complete
 
 # Make sure the attendee can sudo without a password (lab convenience, not production).
-# This is on top of cloud-init's default behavior of giving the admin_username sudo rights.
 bootcmd:
   - echo "{{ attendee_ssh_username }} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/90-{{ attendee_ssh_username }}-nopasswd
   - chmod 0440 /etc/sudoers.d/90-{{ attendee_ssh_username }}-nopasswd
