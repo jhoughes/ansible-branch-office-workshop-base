@@ -22,7 +22,6 @@ package_update: true
 package_upgrade: false   # don't waste 10 minutes patching on first boot
 
 packages:
-  - ansible
   - python3-pip
   - python3-venv
   - git
@@ -91,6 +90,7 @@ runcmd:
   # system Python as externally managed. This is the lab; production should
   # use a venv.
   - pip3 install --break-system-packages "pywinrm[kerberos]" requests
+  - pip3 install ansible-core --break-system-packages || pip3 install ansible-core
 
   # Install the workshop's required Galaxy collections from requirements.yml.
   # The requirements file is the canonical source of truth for which
