@@ -33,7 +33,7 @@
     # generated independently so a leak of one doesn't compromise the other.
     - name: Generate the attendee's SSH password
       ansible.builtin.set_fact:
-        generated_ssh_password: "{{ lookup('password', '/dev/null length=16 chars=ascii_letters,digits') }}"
+        generated_ssh_password: "W0rk!{{ lookup('password', '/dev/null length=12 chars=ascii_letters,digits') }}"
 
     - name: Generate the Windows local admin password
       ansible.builtin.set_fact:
