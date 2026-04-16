@@ -60,7 +60,7 @@ param vmSizeLinux string = 'Standard_B2s'
 param vmSizeWindows string = 'Standard_B2ms'
 
 @description('URL of the WinRM bootstrap PowerShell script. Use a commit-pinned GitHub Gist raw URL — see provisioning/azure/roles/attendee-rg/defaults/main.yml for the recommended format.')
-param winrmBootstrapScriptUrl string = 'https://gist.githubusercontent.com/REPLACE_WITH_YOUR_GIST_USERNAME/REPLACE_WITH_GIST_ID/raw/REPLACE_WITH_COMMIT_SHA/winrm-bootstrap.ps1'
+param winrmBootstrapScriptUrl string = 'https://gist.githubusercontent.com/jhoughes/7ec4aa531ad7dd8ce3a1453f89647da6/raw/5d6e07e60e84230b73dc76999a9b8ea5c4337485/winrm-bootstrap.ps1'
 
 @description('cloud-init content for the control node, base64-encoded. Generate from cloud-init-control.yml in deploy-all.sh.')
 param cloudInitBase64 string
