@@ -106,7 +106,13 @@ runcmd:
 
   # Make sure the workshop directory is owned correctly even if anything above
   # ran as root by mistake.
-  - chown -R {{ attendee_ssh_username }}:{{ attendee_ssh_username }} /home/{{ attendee_ssh_username }}/workshop
+  # Fix home directory ownership — earlier runcmd steps run as root and can
+  # create files owned by root inside the attendee's home directory.
+  - chown -R {{ attendee_ssh_username }}:{{ attendee_ssh_username }} /home/{{ attendee_ssh_username }}
+
+  # Create the vault password file from the example so ansible.cfg's
+  # vault_password_file reference doesn't break preflight.
+  - sudo -u {{ attendee_ssh_username }} cp /home/{{ attendee_ssh_username }}/workshop/.vault-pass.example /home/{{ attendee_ssh_username }}/workshop/.vault-pass
 
   # Append the workshop's lab host entries to /etc/hosts so the workshop
   # inventory's short hostnames (web1, web2, mgmt1) resolve correctly.
