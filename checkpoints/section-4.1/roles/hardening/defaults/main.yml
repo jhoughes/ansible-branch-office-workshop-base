@@ -1,0 +1,18 @@
+---
+# =============================================================================
+# roles/hardening/defaults/main.yml
+# =============================================================================
+# The hardening role is intentionally opinionated — most of its behavior is
+# baked into the task lists rather than parameterized. This keeps the lab
+# focused on the patterns rather than the policy knobs.
+#
+# In a production hardening role you'd parameterize most of this (which
+# packages to remove, which firewall rules, which password policy values,
+# etc.) so different environments could tune the baseline. For the workshop
+# we keep it simple.
+# =============================================================================
+
+# The lockout threshold for both Linux (PAM) and Windows (account lockout policy).
+# Currently used only by Windows tasks; Linux PAM lockout is left as a stretch goal.
+hardening_lockout_threshold: 5
+hardening_lockout_duration_minutes: 15

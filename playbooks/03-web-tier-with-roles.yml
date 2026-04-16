@@ -1,0 +1,30 @@
+---
+# =============================================================================
+# playbooks/03-web-tier-with-roles.yml
+# =============================================================================
+# Same end state as playbooks/02-web-tier.yml from section 2.1, but using
+# the webserver role instead of inline tasks.
+#
+# Compare the two files side by side:
+#   - 02-web-tier.yml is ~80 lines of YAML with all the logic inline
+#   - 03-web-tier-with-roles.yml is ~10 lines that just says "apply the role"
+#
+# The behavior is identical. The role version is dramatically more reusable
+# because:
+#   - You can apply the role to many different hosts in many different
+#     playbooks without copy-pasting tasks
+#   - You can override defaults at the call site to customize behavior
+#     without modifying the role
+#   - Role variables, templates, handlers, and metadata all live together
+#     in one well-organized directory tree
+#
+# Run it:
+#     ansible-playbook playbooks/03-web-tier-with-roles.yml
+# =============================================================================
+
+- name: Configure the branch office web tier (using the webserver role)
+  hosts: webservers
+  become: true
+
+  roles:
+    - webserver

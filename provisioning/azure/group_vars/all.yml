@@ -1,0 +1,134 @@
+# =============================================================================
+# group_vars/all.yml — Global settings for Azure provisioning
+# =============================================================================
+# These variables apply to every attendee being provisioned. Edit carefully —
+# changing the region or VM SKUs after a partial provisioning will cause
+# inconsistent labs across attendees.
+#
+# Override on the command line for one-off testing:
+#   ansible-playbook site.yml -e "azure_location=eastus2"
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Region & subscription
+# -----------------------------------------------------------------------------
+# westus2 = Quincy, WA. ~150 miles from Seattle, lowest latency for the venue.
+# Other reasonable choices for a Pacific Northwest conference: westus3 (Phoenix),
+# westus (California). Stick with westus2 unless you have a quota or pricing
+# reason to switch.
+azure_location: westus2
+
+# -----------------------------------------------------------------------------
+# Naming conventions
+# -----------------------------------------------------------------------------
+# Resource names are built as "{{ workshop_name }}-att-{{ attendee_number }}-{{ thing }}".
+# The "att" infix makes it easy to filter and bulk-delete attendee resources
+# without touching anything else in the subscription.
+workshop_name: workshop
+resource_group_name: "{{ workshop_name }}-att-{{ attendee_number }}-rg"
+
+# Tags applied to every resource. Useful for cost reporting and bulk teardown.
+azure_tags:
+  workshop: "branch-office-ansible"
+  purpose: "{{ purpose | default('workshop-lab') }}"
+  attendee: "{{ attendee_number }}"
+  managed_by: "ansible-provisioning-playbook"
+  delete_after: "{{ workshop_date | default('2026-12-31') }}"
+
+# -----------------------------------------------------------------------------
+# Network configuration
+# -----------------------------------------------------------------------------
+# Each attendee gets their own /16 vnet, with a /24 subnet inside it.
+# The third octet is the attendee number, so attendee 07's network is
+# 10.7.0.0/16 with subnet 10.7.0.0/24. This makes it trivial to identify
+# which attendee a given private IP belongs to during troubleshooting.
+vnet_address_space: "10.{{ attendee_number | int }}.0.0/16"
+subnet_address_space: "10.{{ attendee_number | int }}.0.0/24"
+
+# Static private IPs within the subnet, by host role
+host_private_ips:
+  control: "10.{{ attendee_number | int }}.0.5"
+  web1: "10.{{ attendee_number | int }}.0.10"
+  web2: "10.{{ attendee_number | int }}.0.11"   # added during section 3.3
+  mgmt1: "10.{{ attendee_number | int }}.0.20"
+
+# -----------------------------------------------------------------------------
+# Network security: who can SSH to attendee control nodes?
+# -----------------------------------------------------------------------------
+# The NSG only allows inbound SSH from these CIDR blocks. Set this to the
+# conference network's egress IP(s) before workshop day. Leaving it as
+# "0.0.0.0/0" works but is sloppy — every attendee's control node would
+# accept SSH from anywhere on the internet.
+#
+# To find your conference network's egress IP, ask the venue or run
+# `curl ifconfig.me` from a laptop on the venue WiFi the day before.
+allowed_ssh_sources:
+  - "0.0.0.0/0"   # CHANGE ME before workshop day to the conference egress IP
+
+# -----------------------------------------------------------------------------
+# VM SKUs
+# -----------------------------------------------------------------------------
+# Standard_B2s = 2 vCPU, 4 GB RAM, burstable. Cheap. Adequate for Linux.
+# Standard_B2ms = 2 vCPU, 8 GB RAM, burstable. Windows needs the extra memory
+# to not feel sluggish over RDP, even though we're not running RDP normally.
+vm_size_linux: Standard_B2s
+vm_size_windows: Standard_B2ms
+
+# -----------------------------------------------------------------------------
+# OS images
+# -----------------------------------------------------------------------------
+# These reference Azure Marketplace images. Pin to specific publisher/offer/sku
+# values rather than "latest" wherever possible — that way two attendees
+# provisioned a week apart get the same OS.
+#
+# Ubuntu 22.04 LTS Gen2:
+ubuntu_image:
+  publisher: Canonical
+  offer: 0001-com-ubuntu-server-jammy
+  sku: 22_04-lts-gen2
+  version: latest
+
+# Windows Server 2022 Datacenter with Desktop Experience:
+windows_image:
+  publisher: MicrosoftWindowsServer
+  offer: WindowsServer
+  sku: 2022-datacenter-g2
+  version: latest
+
+# -----------------------------------------------------------------------------
+# Credentials
+# -----------------------------------------------------------------------------
+# The SSH username for the Linux control node. The password is generated
+# per-attendee at provisioning time and written to attendee-credentials.csv.
+attendee_ssh_username: attendee
+
+# The local Administrator password for the Windows mgmt1 host. Same generation
+# logic — written to the credentials CSV per attendee. Note that attendees
+# never see or use this directly; it's only relevant if they want to RDP to
+# the Windows host (which requires SSH port forwarding through control).
+windows_admin_username: workshop_admin
+
+# -----------------------------------------------------------------------------
+# The Vault password for the workshop's section 3.2.
+# This is the same password printed on every attendee's Vault password card
+# and posted on the section 3.2 slide. It's recorded in the credentials CSV
+# only so the credentials file is the single source of truth for printing.
+# -----------------------------------------------------------------------------
+# This is NOT a real secret — it's a workshop training credential that gets
+# rotated for every workshop run. Don't reuse this for anything that matters.
+workshop_vault_password: "POWERSHELL&DEVOPS_SUMMIT_2026!"
+
+# -----------------------------------------------------------------------------
+# Workshop repo URL — cloned to ~/workshop on each attendee's control node
+# -----------------------------------------------------------------------------
+workshop_repo_url: "https://github.com/jhoughes/ansible-branch-office-workshop-base.git"
+workshop_repo_branch: main
+workshop_clone_path: "/home/{{ attendee_ssh_username }}/workshop"
+
+# -----------------------------------------------------------------------------
+# Parallelism
+# -----------------------------------------------------------------------------
+# How many attendees to provision in parallel. 5 is a good default — fast
+# enough that 20 attendees provision in ~40 minutes, slow enough that you
+# don't hit Azure API rate limits.
+provisioning_forks: 5

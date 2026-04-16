@@ -1,0 +1,78 @@
+---
+# =============================================================================
+# preflight/check.yml — Lab environment ceremony
+# =============================================================================
+# This is the first playbook attendees run during section 1.4. It's
+# intentionally short — its job is to:
+#
+#   1. Demonstrate that Ansible works ("you just ran a playbook")
+#   2. Confirm web1 and mgmt1 are reachable from the control node
+#   3. Print a friendly summary of what each host looks like
+#
+# Total runtime: ~30 seconds. Total tasks: 6. Total drama: zero.
+#
+# This is NOT the integration test for the workshop — that's the
+# instructor's verify.yml in provisioning/azure/. This playbook is for
+# attendees, on workshop day, as the ceremony that introduces them to
+# running Ansible.
+#
+# Run it from the workshop root:
+#     cd ~/workshop
+#     ansible-playbook preflight/check.yml
+# =============================================================================
+
+- name: "Preflight — say hello to web1 (the Linux web server)"
+  hosts: web1
+  gather_facts: true
+  tasks:
+
+    - name: Confirm web1 is reachable
+      ansible.builtin.ping:
+
+    - name: Show what web1 looks like
+      ansible.builtin.debug:
+        msg:
+          - "✓ web1 is reachable"
+          - "  hostname:     {{ ansible_hostname }}"
+          - "  distribution: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "  kernel:       {{ ansible_kernel }}"
+          - "  IP address:   {{ ansible_default_ipv4.address }}"
+
+
+- name: "Preflight — say hello to mgmt1 (the Windows host)"
+  hosts: mgmt1
+  gather_facts: true
+  tasks:
+
+    - name: Confirm mgmt1 is reachable
+      ansible.windows.win_ping:
+
+    - name: Show what mgmt1 looks like
+      ansible.builtin.debug:
+        msg:
+          - "✓ mgmt1 is reachable"
+          - "  hostname:     {{ ansible_hostname }}"
+          - "  os name:      {{ ansible_os_name }}"
+          - "  os version:   {{ ansible_os_version }}"
+          - "  IP address:   {{ ansible_ip_addresses | select('match', '^10\\.') | first }}"
+
+
+- name: "Preflight — summary"
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Show the welcome message
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "Preflight check complete. Welcome to the workshop."
+          - ""
+          - "You have just run an Ansible playbook against two hosts:"
+          - "  - web1  (Linux, your web server target)"
+          - "  - mgmt1 (Windows, your management host target)"
+          - ""
+          - "If you saw two ✓ marks above, you're ready for section 1.4's"
+          - "next step: setting up SSH port forwarding."
+          - ""
+          - "Your instructor will walk you through the rest."
+          - "============================================================"

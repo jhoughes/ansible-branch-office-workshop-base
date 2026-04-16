@@ -1,0 +1,86 @@
+---
+# =============================================================================
+# requirements.yml — Pinned Ansible Galaxy collections for the workshop
+# =============================================================================
+# This is the canonical declaration of every Ansible Galaxy collection the
+# workshop's playbooks need. Both provisioning paths (Azure cloud-init and
+# Vagrant) install from this file, so there is exactly one place to update
+# when a collection version needs to change.
+#
+# Why version-pin?
+#   The workshop is reproducible material — attendees may rebuild this lab
+#   six months or two years from now. Pinning ensures their lab matches the
+#   workshop's tested configuration, not whatever happened to be released
+#   on Galaxy that day. Unpinned `latest` installs are how labs that worked
+#   on workshop day stop working three months later.
+#
+# How to update versions:
+#   1. Test the workshop end-to-end with the current versions (the lab build
+#      / capture pass — see docs/captures/HOW-TO-CAPTURE.md)
+#   2. Update the `version:` lines below
+#   3. Re-test
+#   4. Commit
+#   5. Note the version bump in the commit message so the change is searchable
+#
+# How to find current latest stable versions:
+#   - Browse https://galaxy.ansible.com/<namespace>/<collection>
+#   - Or query the API: curl https://galaxy.ansible.com/api/v3/collections/<ns>/<name>/
+#   - Or check the GitHub releases page for each collection
+#
+# Why each collection is needed:
+#
+#   ansible.windows      — Microsoft-supported core Windows modules
+#                          (win_ping, win_user, win_group, win_feature,
+#                          win_service, win_powershell, etc.)
+#                          Used in: section 2.3, section 3.1
+#
+#   community.windows    — Community-maintained Windows modules
+#                          (win_share, win_firewall_rule, etc.)
+#                          Used in: section 2.3, section 3.1
+#
+#   chocolatey.chocolatey — Chocolatey package manager modules
+#                          (win_chocolatey, win_chocolatey_facts, etc.)
+#                          Used in: section 2.3 (admin tool installs)
+#
+#   ansible.posix        — POSIX-specific modules
+#                          (acl, mount, sysctl, firewalld, etc.)
+#                          Used in: section 3.1 (hardening role)
+#
+#   community.general    — Catch-all for community-maintained modules
+#                          (ufw, htpasswd, archive, ini_file, etc.)
+#                          Used in: section 2.1 (ufw firewall rules)
+#                                   section 3.1 (hardening tasks)
+#
+# Version notes:
+#   The versions below are pinned to the latest stable releases as of the
+#   workshop's last successful capture pass. They are tested compatible
+#   with ansible-core 2.18+ (the Ubuntu 22.04 default ansible package).
+#
+#   Before workshop day, the instructor should:
+#     1. Visit each collection's Galaxy page to check for newer releases
+#     2. Update versions if any have shipped meaningful improvements
+#     3. Run the lab build / capture pass to confirm nothing broke
+#
+#   This is documented in INSTRUCTOR-SETUP.md Phase 1.3.
+# =============================================================================
+
+collections:
+  - name: ansible.windows
+    version: "3.2.0"
+    source: https://galaxy.ansible.com
+
+  - name: community.windows
+    version: "3.0.0"
+    source: https://galaxy.ansible.com
+
+  - name: chocolatey.chocolatey
+    version: "1.5.3"
+    source: https://galaxy.ansible.com
+
+  - name: ansible.posix
+    version: "2.0.0"
+    source: https://galaxy.ansible.com
+
+  - name: community.general
+    version: "11.0.0"
+    source: https://galaxy.ansible.com

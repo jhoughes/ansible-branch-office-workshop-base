@@ -1,0 +1,150 @@
+---
+# =============================================================================
+# roles/windows-mgmt/tasks/main.yml
+# =============================================================================
+# Configures the Windows Server 2022 host as a branch office management /
+# jump-box. This is where the workshop pivots from Linux to Windows and shows
+# attendees that Ansible's "manage anything" promise extends to their world.
+#
+# What this role does:
+#   1. Installs a small set of recognizable admin tools via Chocolatey
+#      (the "holy crap it works" moment for Windows admins seeing Ansible
+#      manage Windows for the first time)
+#   2. Creates a local group and a couple of local users
+#   3. Creates an SMB share that the local group can access
+#   4. Runs a custom PowerShell script via win_powershell and captures
+#      structured output back as a registered Ansible variable
+#
+# Pedagogically, this role is deliberately broader than the webserver role
+# from section 2.2 — it shows off five different win_* modules in one
+# coherent scenario, so attendees see the breadth of what Ansible can do
+# on Windows in a single playbook run.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Step 1: Install Chocolatey itself
+# -----------------------------------------------------------------------------
+# win_chocolatey will install Chocolatey if it's not already present, but
+# the official Chocolatey install script is the more robust way. This task
+# is idempotent — if Chocolatey is already installed, it does nothing.
+- name: Install Chocolatey package manager
+  ansible.windows.win_shell: |
+    if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
+      Set-ExecutionPolicy Bypass -Scope Process -Force
+      [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+      iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+    }
+  args:
+    creates: 'C:\ProgramData\chocolatey\choco.exe'
+  # The 'creates' arg is what makes this idempotent at the Ansible level —
+  # if the file exists, the task is skipped entirely.
+
+# -----------------------------------------------------------------------------
+# Step 2: Install admin tools via Chocolatey
+# -----------------------------------------------------------------------------
+# THIS IS THE MOMENT. The audience watches Ansible — running on a Linux
+# control node — install real, recognizable Windows software on a Windows
+# host. VS Code, Notepad++, 7-Zip, and PowerShell 7 are all things every
+# Windows admin has installed by hand on dozens of machines. Now they're
+# being installed by code.
+- name: Install admin tools via Chocolatey
+  chocolatey.chocolatey.win_chocolatey:
+    name: "{{ windows_mgmt_chocolatey_packages }}"
+    state: present
+  # The list of packages is in defaults/main.yml. Override at the playbook
+  # level by setting windows_mgmt_chocolatey_packages with your own list.
+
+# -----------------------------------------------------------------------------
+# Step 3: Create a local group for branch office IT staff
+# -----------------------------------------------------------------------------
+- name: Create the branch office IT group
+  ansible.windows.win_group:
+    name: "{{ windows_mgmt_it_group_name }}"
+    description: "Branch office IT staff with access to the management share"
+    state: present
+
+# -----------------------------------------------------------------------------
+# Step 4: Create local user accounts and add them to the group
+# -----------------------------------------------------------------------------
+- name: Create local user accounts for branch office IT staff
+  ansible.windows.win_user:
+    name: "{{ item.name }}"
+    fullname: "{{ item.fullname }}"
+    description: "{{ item.description }}"
+    password: "{{ item.password }}"
+    password_never_expires: true
+    groups:
+      - "{{ windows_mgmt_it_group_name }}"
+    groups_action: add
+    state: present
+  loop: "{{ windows_mgmt_local_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+    # The label keeps the output clean — without it, every loop iteration
+    # would dump the whole user dict (including the password) to stdout.
+  no_log: true
+  # no_log keeps passwords out of the log even if Ansible's verbosity is
+  # cranked up. Always use no_log on tasks that handle credentials.
+
+# -----------------------------------------------------------------------------
+# Step 5: Create the SMB share directory and the share itself
+# -----------------------------------------------------------------------------
+- name: Ensure the share directory exists
+  ansible.windows.win_file:
+    path: "{{ windows_mgmt_share_path }}"
+    state: directory
+
+- name: Create the branch office SMB share
+  ansible.windows.win_share:
+    name: "{{ windows_mgmt_share_name }}"
+    description: "Branch office shared files — accessible to the IT group"
+    path: "{{ windows_mgmt_share_path }}"
+    full: "{{ windows_mgmt_it_group_name }}"
+    # 'full' grants Full Control to the IT group. Other options: read, change.
+    state: present
+
+# -----------------------------------------------------------------------------
+# Step 6: Open the firewall for SMB
+# -----------------------------------------------------------------------------
+# SMB is normally already allowed in domain/private profiles on Windows
+# Server, but explicit is better than implicit — this task ensures the
+# rule exists no matter what the base image had.
+- name: Allow inbound SMB through Windows Firewall
+  community.windows.win_firewall_rule:
+    name: "Workshop SMB inbound"
+    description: "Allow SMB from the branch office subnet"
+    localport: 445
+    action: allow
+    direction: in
+    protocol: tcp
+    remoteip: "10.0.0.0/8"
+    state: present
+    enabled: true
+
+# -----------------------------------------------------------------------------
+# Step 7: Run a custom PowerShell inventory script via win_powershell
+# -----------------------------------------------------------------------------
+# This is the second big payoff for the audience. They write PowerShell
+# every day — now they see Ansible run their PowerShell on a Windows host
+# and capture structured output back as a registered variable. The script
+# returns a dict of system info that Ansible then prints in a debug task.
+- name: Gather a custom inventory report from mgmt1
+  ansible.windows.win_powershell:
+    script: "{{ lookup('file', 'inventory-report.ps1') }}"
+    # The lookup pulls the script from roles/windows-mgmt/files/.
+    # win_powershell sends it to the host, runs it, and captures whatever
+    # the script writes to the output stream.
+  register: inventory_report
+
+- name: Show the inventory report
+  ansible.builtin.debug:
+    msg:
+      - "Branch office mgmt1 inventory report:"
+      - "  hostname:        {{ inventory_report.output.Hostname }}"
+      - "  os version:      {{ inventory_report.output.OSVersion }}"
+      - "  installed RAM:   {{ inventory_report.output.MemoryGB }} GB"
+      - "  CPU cores:       {{ inventory_report.output.CPUCores }}"
+      - "  uptime (hours):  {{ inventory_report.output.UptimeHours }}"
+      - "  installed apps:  {{ inventory_report.output.InstalledAppCount }}"
+      - "  local accounts:  {{ inventory_report.output.LocalUserCount }}"
+      - "  SMB shares:      {{ inventory_report.output.ShareCount }}"

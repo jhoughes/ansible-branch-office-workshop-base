@@ -1,0 +1,33 @@
+---
+# =============================================================================
+# inventory/group_vars/all.yml
+# =============================================================================
+# Variables that apply to every host in the workshop inventory.
+# Linux-specific and Windows-specific overrides live in linux.yml and
+# windows.yml respectively.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Workshop metadata — used in templates throughout the workshop
+# -----------------------------------------------------------------------------
+workshop_name: "Branch Office Standup"
+workshop_environment: "lab"
+workshop_owner: "IT Operations"
+
+# The branch identifier — used in Jinja2 templates that render the status
+# page in section 2.1. Attendees can change this and re-run the playbook to
+# see the page update.
+branch_id: "BR-001"
+branch_location: "Seattle"
+
+# -----------------------------------------------------------------------------
+# Default Ansible user for SSH
+# -----------------------------------------------------------------------------
+# All Linux hosts in the lab use the 'attendee' user that was created during
+# Azure provisioning. The Windows host has its own connection vars in
+# windows.yml and doesn't use ansible_user.
+ansible_user: attendee
+
+# Don't elevate by default. Individual playbooks set become: yes when needed.
+# This is safer than blanket sudo.
+ansible_become: false

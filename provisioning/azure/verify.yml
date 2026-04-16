@@ -1,0 +1,173 @@
+---
+# =============================================================================
+# verify.yml — Day-before sanity check
+# =============================================================================
+# Run this the day before (and the morning of) the workshop to confirm every
+# attendee's lab environment is reachable and healthy. Catches problems while
+# there's still time to fix them.
+#
+# What it checks:
+#   - The attendee's resource group exists in Azure
+#   - The control node's public IP responds to SSH
+#   - Cloud-init finished successfully on the control node
+#   - The control node can reach web1 and mgmt1 over the private network
+#   - WinRM is responding on mgmt1 (the bootstrap script ran to completion)
+#   - The workshop repo is cloned and ansible can run from it
+#
+# Usage:
+#     ansible-playbook verify.yml
+#
+# To verify a single attendee:
+#     ansible-playbook verify.yml --limit attendee07
+#
+# Anything that fails here gets reported to stdout AND written to
+# verify-failures.txt for follow-up.
+# =============================================================================
+
+- name: Verify Azure resources exist for each attendee
+  hosts: attendees
+  gather_facts: false
+
+  tasks:
+    - name: Look up the resource group
+      azure.azcollection.azure_rm_resourcegroup_info:
+        name: "{{ resource_group_name }}"
+      delegate_to: localhost
+      register: rg_info
+
+    - name: Fail if the resource group doesn't exist
+      ansible.builtin.fail:
+        msg: "Resource group {{ resource_group_name }} not found in Azure. Did site.yml run for this attendee?"
+      when: rg_info.resourcegroups | length == 0
+
+    - name: Look up the control node's public IP
+      azure.azcollection.azure_rm_publicipaddress_info:
+        resource_group: "{{ resource_group_name }}"
+        name: control-pip
+      delegate_to: localhost
+      register: pip_info
+
+    - name: Record the public IP for connection
+      ansible.builtin.set_fact:
+        control_public_ip: "{{ pip_info.publicipaddresses[0].ip_address }}"
+
+    - name: Add the control node to a dynamic in-memory inventory group
+      ansible.builtin.add_host:
+        name: "{{ inventory_hostname }}-control"
+        groups: control_nodes
+        ansible_host: "{{ control_public_ip }}"
+        ansible_user: "{{ attendee_ssh_username }}"
+        attendee_ref: "{{ inventory_hostname }}"
+        attendee_number_ref: "{{ attendee_number }}"
+
+
+- name: Verify the control nodes are reachable and bootstrapped
+  hosts: control_nodes
+  gather_facts: false
+  # Don't fail the whole play if one attendee is broken — keep going so we
+  # learn about all the failures in one pass.
+  any_errors_fatal: false
+  ignore_unreachable: true
+
+  tasks:
+    - name: Wait for SSH to be reachable
+      ansible.builtin.wait_for_connection:
+        timeout: 60
+      register: ssh_result
+      ignore_errors: true
+
+    - name: Record SSH failures for the summary
+      ansible.builtin.set_fact:
+        ssh_failed: "{{ ssh_result is failed }}"
+
+    - name: Gather facts (only if SSH succeeded)
+      ansible.builtin.setup:
+      when: not ssh_failed
+      ignore_errors: true
+
+    - name: Verify cloud-init bootstrap finished
+      ansible.builtin.stat:
+        path: /var/lib/cloud/instance/workshop-bootstrap-complete
+      register: bootstrap_marker
+      when: not ssh_failed
+
+    - name: Verify the workshop repo is cloned
+      ansible.builtin.stat:
+        path: "{{ workshop_clone_path }}/ansible.cfg"
+      register: repo_check
+      when: not ssh_failed
+
+    - name: Verify ansible is installed
+      ansible.builtin.command: ansible --version
+      register: ansible_version
+      changed_when: false
+      when: not ssh_failed
+      ignore_errors: true
+
+    - name: Verify pywinrm is installed
+      ansible.builtin.command: python3 -c "import winrm; print(winrm.__version__)"
+      register: pywinrm_version
+      changed_when: false
+      when: not ssh_failed
+      ignore_errors: true
+
+    - name: Try a win_ping against mgmt1 from this control node
+      ansible.builtin.command:
+        cmd: >
+          ansible mgmt1 -m ansible.windows.win_ping
+          -i {{ workshop_clone_path }}/inventory/hosts.yml
+        chdir: "{{ workshop_clone_path }}"
+      register: winrm_test
+      changed_when: false
+      when: not ssh_failed and repo_check.stat.exists
+      ignore_errors: true
+      # Note: this requires the workshop's inventory/hosts.yml to be set up
+      # such that mgmt1's connection vars include the password from the
+      # credentials CSV. The Pass 3 work fills this in. For Pass 2, this
+      # task may fail; that's expected until Pass 3.
+
+    - name: Record results for this attendee
+      ansible.builtin.set_fact:
+        verify_result:
+          attendee: "{{ attendee_ref }}"
+          attendee_number: "{{ attendee_number_ref }}"
+          control_ip: "{{ ansible_host }}"
+          ssh_ok: "{{ not ssh_failed }}"
+          bootstrap_ok: "{{ bootstrap_marker.stat.exists | default(false) }}"
+          repo_ok: "{{ repo_check.stat.exists | default(false) }}"
+          ansible_ok: "{{ ansible_version.rc | default(1) == 0 }}"
+          pywinrm_ok: "{{ pywinrm_version.rc | default(1) == 0 }}"
+          winrm_ok: "{{ winrm_test.rc | default(1) == 0 }}"
+
+
+- name: Summarize verification results
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Build the summary table
+      ansible.builtin.set_fact:
+        verify_summary: |
+          ============================================================
+          Verification summary
+          ============================================================
+          {% for attendee in groups['control_nodes'] %}
+          {% set r = hostvars[attendee].verify_result | default({}) %}
+          Attendee {{ r.attendee_number | default('???') }} ({{ r.control_ip | default('no IP') }}):
+            SSH:        {{ '✓' if r.ssh_ok | default(false) else '✗' }}
+            Bootstrap:  {{ '✓' if r.bootstrap_ok | default(false) else '✗' }}
+            Repo:       {{ '✓' if r.repo_ok | default(false) else '✗' }}
+            Ansible:    {{ '✓' if r.ansible_ok | default(false) else '✗' }}
+            pywinrm:    {{ '✓' if r.pywinrm_ok | default(false) else '✗' }}
+            win_ping:   {{ '✓' if r.winrm_ok | default(false) else '✗' }}
+          {% endfor %}
+          ============================================================
+
+    - name: Print the summary
+      ansible.builtin.debug:
+        msg: "{{ verify_summary.split('\n') }}"
+
+    - name: Write failures to a file for follow-up
+      ansible.builtin.copy:
+        content: "{{ verify_summary }}"
+        dest: "{{ playbook_dir }}/verify-results.txt"
+        mode: '0644'

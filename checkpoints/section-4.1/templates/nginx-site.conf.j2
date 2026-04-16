@@ -1,0 +1,26 @@
+server {
+    listen {{ nginx_listen_port }} default_server;
+    listen [::]:{{ nginx_listen_port }} default_server;
+
+    root {{ nginx_document_root }};
+    index index.html;
+
+    server_name _;
+
+    # The branch office status page is the default served page.
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    # Simple health check endpoint that always returns 200.
+    # Used by the load balancer in section 3.3.
+    location = /health {
+        access_log off;
+        add_header Content-Type text/plain;
+        return 200 "healthy\n";
+    }
+
+    # Basic security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+}

@@ -1,0 +1,23 @@
+---
+# =============================================================================
+# inventory/group_vars/windows/vault.yml.example
+# =============================================================================
+# This is the UNENCRYPTED template. Attendees create their real vault.yml
+# from this template during section 3.2 by copying it and encrypting the
+# copy with `ansible-vault encrypt`.
+#
+# In the workshop:
+#   1. cp inventory/group_vars/windows/vault.yml.example inventory/group_vars/windows/vault.yml
+#   2. nano inventory/group_vars/windows/vault.yml — paste real password
+#   3. ansible-vault encrypt inventory/group_vars/windows/vault.yml
+#
+# The .gitignore in the workshop excludes inventory/group_vars/windows/vault.yml
+# so attendees can't accidentally commit a secret. This example file is what
+# gets committed.
+#
+# All variables in vault files should be prefixed with vault_ so they're
+# easy to spot in code review — anywhere you see {{ vault_ }} you know
+# the value is encrypted at rest.
+# =============================================================================
+
+vault_windows_admin_password: "REPLACE_ME_WITH_PASSWORD_FROM_YOUR_CARD"

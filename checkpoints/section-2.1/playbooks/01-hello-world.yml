@@ -1,0 +1,51 @@
+---
+# =============================================================================
+# playbooks/01-hello-world.yml
+# =============================================================================
+# The literal first playbook attendees run during section 2.1. Deliberately
+# trivial — installs chrony (time sync) and ensures it's running. Modeled on
+# the first-ansible-playbook example from geerlingguy/ansible-for-devops,
+# which is the canonical "first Ansible playbook" pattern.
+#
+# Why chrony?
+#   - It's already installed on Ubuntu 22.04 so the package install is
+#     idempotent on first run (ok, not changed), which teaches idempotency
+#   - It's a real service every sysadmin has dealt with
+#   - It gives us a service to start, stop, and query
+#
+# What the attendee will see:
+#   - Fact gathering
+#   - A package install task (probably already satisfied → ok)
+#   - A service state task (probably already satisfied → ok)
+#   - A "show the status" task that prints the systemd unit info
+#
+# Run it:
+#     ansible-playbook playbooks/01-hello-world.yml
+# =============================================================================
+
+- name: Hello world — ensure chrony is installed and running on web1
+  hosts: web1
+  become: true   # chrony is a system service, needs root
+
+  tasks:
+    - name: Install chrony
+      ansible.builtin.apt:
+        name: chrony
+        state: present
+        update_cache: true
+        cache_valid_time: 3600   # don't update apt cache if it was done recently
+
+    - name: Ensure chrony service is started and enabled at boot
+      ansible.builtin.service:
+        name: chrony
+        state: started
+        enabled: true
+
+    - name: Check chrony's current sync status
+      ansible.builtin.command: chronyc tracking
+      register: chrony_status
+      changed_when: false   # running a query doesn't count as a change
+
+    - name: Show chrony status
+      ansible.builtin.debug:
+        msg: "{{ chrony_status.stdout_lines }}"

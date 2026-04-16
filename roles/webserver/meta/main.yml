@@ -1,0 +1,29 @@
+---
+# =============================================================================
+# roles/webserver/meta/main.yml
+# =============================================================================
+# Role metadata. For workshop purposes this is mostly a placeholder, but in
+# production roles this file declares dependencies on other roles, supported
+# platforms (used by Ansible Galaxy when publishing), and author info.
+# =============================================================================
+
+galaxy_info:
+  role_name: webserver
+  author: Joe Houghes and Mike Nelson
+  description: |
+    Configures a Linux host as a branch office web server. Installs nginx,
+    deploys a Jinja2-templated status page, configures the firewall.
+    Built for the Ansible Branch Office Workshop.
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+  galaxy_tags:
+    - web
+    - nginx
+    - workshop
+
+# This role has no dependencies on other roles.
+dependencies: []

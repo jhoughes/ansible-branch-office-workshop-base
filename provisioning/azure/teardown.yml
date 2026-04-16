@@ -1,0 +1,102 @@
+---
+# =============================================================================
+# teardown.yml — Delete all attendee resource groups
+# =============================================================================
+# Run this after the workshop is over. The most important step in the entire
+# provisioning workflow — forgetting to run this is how a $300 workshop turns
+# into a $1500 surprise bill.
+#
+# Usage:
+#     ansible-playbook teardown.yml
+#
+# To tear down a single attendee (e.g., the instructor capture lab):
+#     ansible-playbook teardown.yml --limit instructor
+#
+# Safety: this playbook prompts for confirmation before deleting anything.
+# To skip the prompt (for non-interactive runs from a CI system), pass:
+#     ansible-playbook teardown.yml -e "skip_confirmation=true"
+# =============================================================================
+
+- name: Confirm teardown
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: List the resource groups about to be deleted
+      ansible.builtin.debug:
+        msg: |
+          About to DELETE the following Azure resource groups:
+          {% for attendee in groups['attendees'] %}
+            - {{ workshop_name }}-att-{{ hostvars[attendee].attendee_number }}-rg
+          {% endfor %}
+
+          This action is IRREVERSIBLE. All VMs, disks, networks, and public
+          IPs in these resource groups will be permanently deleted.
+
+    - name: Confirm before proceeding
+      ansible.builtin.pause:
+        prompt: |
+          Type "DELETE" (in capitals) to confirm, or Ctrl-C to abort
+      register: confirmation
+      when: not (skip_confirmation | default(false) | bool)
+
+    - name: Verify the operator typed DELETE
+      ansible.builtin.fail:
+        msg: "Aborted: confirmation did not match 'DELETE'"
+      when:
+        - not (skip_confirmation | default(false) | bool)
+        - confirmation.user_input != "DELETE"
+
+
+- name: Delete each attendee's resource group
+  hosts: attendees
+  gather_facts: false
+  serial: 10  # tear down faster than provisioning — Azure handles delete in parallel well
+
+  tasks:
+    - name: Delete the resource group
+      azure.azcollection.azure_rm_resourcegroup:
+        name: "{{ resource_group_name }}"
+        force_delete_nonempty: true
+        state: absent
+      delegate_to: localhost
+      register: delete_result
+
+    - name: Report the deletion
+      ansible.builtin.debug:
+        msg: "Deleted: {{ resource_group_name }} ({{ 'changed' if delete_result.changed else 'already gone' }})"
+
+
+- name: Final teardown summary
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Verify no workshop resource groups remain
+      ansible.builtin.command: az group list --query "[?starts_with(name, 'workshop-att-')].name" -o tsv
+      register: remaining_groups
+      changed_when: false
+
+    - name: Show what's left (should be nothing)
+      ansible.builtin.debug:
+        msg: |
+          Teardown complete.
+
+          Remaining workshop-* resource groups: {{ remaining_groups.stdout_lines | length }}
+          {% if remaining_groups.stdout_lines | length > 0 %}
+          ⚠ The following groups did NOT delete and need manual cleanup:
+          {% for g in remaining_groups.stdout_lines %}
+            - {{ g }}
+          {% endfor %}
+          {% else %}
+          ✓ All workshop resource groups successfully deleted.
+          {% endif %}
+
+    - name: Remind the operator to delete the credentials CSV
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          Don't forget to securely delete the credentials file:
+
+              shred -u {{ playbook_dir }}/attendee-credentials.csv
+
+          (or move it offline if you need to retain it for an audit)
+          ============================================================

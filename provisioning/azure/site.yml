@@ -1,0 +1,105 @@
+---
+# =============================================================================
+# site.yml — Provision all attendee labs in Azure
+# =============================================================================
+# This is the master playbook for the workshop's primary provisioning path.
+# It loops over every attendee in inventory/attendees.yml and creates a
+# complete lab environment for each one: a resource group, vnet, control
+# node (with public IP), Linux web host, and Windows management host.
+#
+# Run this from the provisioning/azure/ directory:
+#
+#     ansible-playbook site.yml
+#
+# To provision a single attendee for testing:
+#
+#     ansible-playbook site.yml --limit attendee01
+#
+# To provision the instructor "capture pass" attendee:
+#
+#     ansible-playbook site.yml --limit instructor
+#
+# After provisioning, the credentials file is written to ./attendee-credentials.csv.
+# Print this and treat it as a secret.
+# =============================================================================
+
+- name: Pre-flight checks before provisioning
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Verify the Azure collection is installed
+      ansible.builtin.command: ansible-galaxy collection list azure.azcollection
+      register: azcollection_check
+      changed_when: false
+      failed_when: azcollection_check.rc != 0
+
+    - name: Verify the user is logged into Azure CLI
+      ansible.builtin.command: az account show --output json
+      register: az_account
+      changed_when: false
+      failed_when: az_account.rc != 0
+
+    - name: Show the Azure subscription that will be used
+      ansible.builtin.debug:
+        msg: >
+          Provisioning into subscription: {{ (az_account.stdout | from_json).name }}
+          ({{ (az_account.stdout | from_json).id }})
+
+    - name: Pause for 5 seconds so the operator can ctrl-C if that's the wrong subscription
+      ansible.builtin.pause:
+        seconds: 5
+        prompt: "Press Ctrl-C now if that's the wrong Azure subscription. Otherwise wait..."
+
+# -----------------------------------------------------------------------------
+# Provision each attendee's lab.
+#
+# Note: hosts: attendees runs once per attendee in the inventory, in parallel
+# (up to provisioning_forks at a time). The actual Azure work happens via
+# delegate_to: localhost inside the role, because the Azure modules connect
+# to Azure from the control machine, not from the (not-yet-existing) target VM.
+# -----------------------------------------------------------------------------
+- name: Provision attendee labs
+  hosts: attendees
+  gather_facts: false
+  serial: "{{ provisioning_forks | default(5) }}"
+
+  tasks:
+    - name: Provision this attendee's complete lab
+      ansible.builtin.include_role:
+        name: attendee-rg
+      vars:
+        attendee_inventory_name: "{{ inventory_hostname }}"
+
+# -----------------------------------------------------------------------------
+# After all attendees are provisioned, write the credentials CSV.
+# -----------------------------------------------------------------------------
+- name: Write attendee credentials CSV
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Render the credentials file from the per-attendee facts collected during provisioning
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/templates/attendee-credentials.csv.j2"
+        dest: "{{ playbook_dir }}/attendee-credentials.csv"
+        mode: '0600'
+      vars:
+        attendees: "{{ groups['attendees'] }}"
+
+    - name: Print the location of the credentials file
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          Provisioning complete.
+
+          Credentials file: {{ playbook_dir }}/attendee-credentials.csv
+          Permissions:      0600 (owner read/write only)
+
+          Treat this file as a SECRET. It contains every attendee's
+          SSH password and the workshop Vault password.
+
+          Next steps:
+            1. Print the credentials onto attendee cards
+            2. Run `ansible-playbook verify.yml` to confirm SSH + WinRM
+               are reachable on every attendee's lab
+            3. After the workshop, run `ansible-playbook teardown.yml`
+          ============================================================

@@ -1,0 +1,52 @@
+---
+# =============================================================================
+# roles/windows-mgmt/defaults/main.yml
+# =============================================================================
+# Default values for variables used by the windows-mgmt role.
+# All variables are prefixed with "windows_mgmt_" to avoid collisions.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Chocolatey packages to install
+# -----------------------------------------------------------------------------
+# Deliberately chose recognizable, audience-friendly packages. Every Windows
+# admin in the room has installed at least three of these by hand. Watching
+# Ansible install them programmatically is the moment that lands.
+#
+# To customize: override windows_mgmt_chocolatey_packages at the playbook
+# level with your own list. See LAB-2.3.md for an exercise on this.
+windows_mgmt_chocolatey_packages:
+  - vscode           # Visual Studio Code
+  - notepadplusplus  # Notepad++
+  - 7zip             # 7-Zip
+  - powershell-core  # PowerShell 7
+
+# -----------------------------------------------------------------------------
+# Local IT group
+# -----------------------------------------------------------------------------
+windows_mgmt_it_group_name: "BranchOfficeIT"
+
+# -----------------------------------------------------------------------------
+# Local user accounts to create and add to the IT group
+# -----------------------------------------------------------------------------
+# These are workshop-fake accounts to demonstrate win_user. The passwords
+# here are placeholders — the role uses no_log so they don't appear in
+# output, but you should still NOT use these strings in any real environment.
+#
+# In section 3.2 (Vault), we'll move these credentials into a Vault-encrypted
+# file. For now, the placeholders demonstrate the pattern.
+windows_mgmt_local_users:
+  - name: alice.jones
+    fullname: "Alice Jones"
+    description: "Branch office IT lead"
+    password: "TempW0rkshop!Pass1"   # placeholder — NEVER use in production
+  - name: bob.smith
+    fullname: "Bob Smith"
+    description: "Branch office IT support"
+    password: "TempW0rkshop!Pass2"   # placeholder — NEVER use in production
+
+# -----------------------------------------------------------------------------
+# SMB share
+# -----------------------------------------------------------------------------
+windows_mgmt_share_name: "BranchOfficeShared"
+windows_mgmt_share_path: "C:\\BranchOfficeShared"

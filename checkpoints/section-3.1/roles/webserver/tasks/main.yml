@@ -1,0 +1,103 @@
+---
+# =============================================================================
+# roles/webserver/tasks/main.yml
+# =============================================================================
+# Configures a Linux host as a branch office web server. This is the same
+# logic that lived inline in playbooks/02-web-tier.yml in section 2.1, now
+# refactored into a proper role.
+#
+# What changed in the refactor:
+#   - The vars: block is now in roles/webserver/defaults/main.yml, where
+#     defaults belong. Anyone using this role can override any of them.
+#   - The handler is in roles/webserver/handlers/main.yml. Same handler,
+#     just lives where Ansible expects role handlers to live.
+#   - The templates are in roles/webserver/templates/. The 'template'
+#     module knows to look there automatically when called from a role —
+#     no relative path needed.
+#   - The tasks themselves are nearly unchanged. Same tasks, same order,
+#     same module calls. The role structure is purely organizational.
+#
+# What didn't change:
+#   - The behavior. Running the role produces the exact same end state
+#     as running the section 2.1 monolithic playbook.
+#   - Idempotency. Re-running is still ok=N, changed=0.
+#   - The handler firing pattern. Notify the handler from a task; handler
+#     runs once at end of play if any notification fired.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Install nginx
+# -----------------------------------------------------------------------------
+- name: Install nginx
+  ansible.builtin.apt:
+    name: nginx
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# -----------------------------------------------------------------------------
+# Prepare the document root directory
+# -----------------------------------------------------------------------------
+- name: Create the document root directory
+  ansible.builtin.file:
+    path: "{{ webserver_document_root }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0755'
+
+# -----------------------------------------------------------------------------
+# Deploy the status page from the Jinja2 template
+# -----------------------------------------------------------------------------
+# Note: the template module looks in roles/webserver/templates/ automatically.
+# No path prefix needed — just the filename.
+- name: Deploy the branch office status page from template
+  ansible.builtin.template:
+    src: status.html.j2
+    dest: "{{ webserver_document_root }}/index.html"
+    owner: www-data
+    group: www-data
+    mode: '0644'
+
+# -----------------------------------------------------------------------------
+# Deploy the nginx site config
+# -----------------------------------------------------------------------------
+- name: Deploy the nginx site config from template
+  ansible.builtin.template:
+    src: nginx-site.conf.j2
+    dest: "/etc/nginx/sites-available/{{ webserver_site_name }}"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload nginx
+
+- name: Enable the branch office site
+  ansible.builtin.file:
+    src: "/etc/nginx/sites-available/{{ webserver_site_name }}"
+    dest: "/etc/nginx/sites-enabled/{{ webserver_site_name }}"
+    state: link
+  notify: Reload nginx
+
+- name: Remove the default nginx site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Reload nginx
+
+# -----------------------------------------------------------------------------
+# Firewall: allow HTTP
+# -----------------------------------------------------------------------------
+- name: Allow HTTP through ufw
+  community.general.ufw:
+    rule: allow
+    port: "{{ webserver_listen_port }}"
+    proto: tcp
+
+# -----------------------------------------------------------------------------
+# Ensure nginx is running
+# -----------------------------------------------------------------------------
+- name: Ensure nginx is started and enabled
+  ansible.builtin.service:
+    name: nginx
+    state: started
+    enabled: true

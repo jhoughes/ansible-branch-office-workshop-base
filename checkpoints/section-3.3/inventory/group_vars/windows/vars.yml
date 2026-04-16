@@ -1,0 +1,47 @@
+---
+# =============================================================================
+# inventory/group_vars/windows/vars.yml
+# =============================================================================
+# Non-secret variables for the windows group. The companion file vault.yml
+# in this same directory contains the encrypted secrets. Both files are
+# loaded automatically by Ansible because they're in a directory named
+# after the group ("windows/").
+#
+# THE CRITICAL PATTERN HERE: notice that ansible_password references
+# vault_windows_admin_password — a variable defined in the encrypted
+# vault.yml file. We never reference vault_* variables directly in
+# playbooks; we always wrap them in a non-vault variable here. This way:
+#
+#   1. Playbooks reference plain names (ansible_password, db_password)
+#   2. Those names are defined here, pointing at the vault_ versions
+#   3. The vault_ versions live in the encrypted file
+#
+# Why bother with the indirection? It keeps the secrets-vs-config
+# separation clean: playbooks have no idea which variables are
+# encrypted and which aren't. You can change which variables are
+# secret without touching any playbook.
+#
+# This is the pattern documented in:
+#   https://docs.ansible.com/ansible/latest/vault_guide/vault_managing_passwords.html
+# and used in the geerlingguy/ansible-for-devops examples.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Connection: WinRM over HTTPS (same as before — moved here from the old
+# windows.yml file)
+# -----------------------------------------------------------------------------
+ansible_connection: winrm
+ansible_port: 5986
+ansible_winrm_transport: basic
+ansible_winrm_scheme: https
+ansible_winrm_server_cert_validation: ignore
+ansible_winrm_read_timeout_sec: 70
+ansible_winrm_operation_timeout_sec: 60
+
+# -----------------------------------------------------------------------------
+# Credentials — wrappers around vault_ variables
+# -----------------------------------------------------------------------------
+# The right-hand-side variable names live in vault.yml (encrypted).
+# The left-hand-side names are what playbooks and roles reference.
+ansible_user: workshop_admin
+ansible_password: "{{ vault_windows_admin_password }}"

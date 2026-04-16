@@ -1,0 +1,23 @@
+---
+# =============================================================================
+# roles/webserver/defaults/main.yml
+# =============================================================================
+# Default values for variables used by the webserver role. These can be
+# overridden anywhere — playbook vars, inventory group_vars, host_vars, or
+# the command line via -e.
+#
+# Naming convention: every variable is prefixed with "webserver_" to avoid
+# collisions with other roles. Without the prefix, you might end up with a
+# "listen_port" variable in the webserver role and another in the windows-mgmt
+# role, and Ansible's variable precedence would make it hard to predict
+# which one wins. Always prefix role variables with the role name.
+# =============================================================================
+
+# The TCP port nginx listens on
+webserver_listen_port: 80
+
+# Where nginx serves files from
+webserver_document_root: /var/www/branch-office
+
+# The nginx site config file name (lives at /etc/nginx/sites-available/<n>)
+webserver_site_name: branch-office

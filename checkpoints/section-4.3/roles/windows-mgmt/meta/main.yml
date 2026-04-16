@@ -1,0 +1,22 @@
+---
+galaxy_info:
+  role_name: windows_mgmt
+  author: Joe Houghes and Mike Nelson
+  description: |
+    Configures a Windows Server 2022 host as a branch office management /
+    jump-box. Installs admin tools via Chocolatey, creates local users and
+    groups, configures an SMB share, runs a custom PowerShell inventory
+    report. Built for the Ansible Branch Office Workshop.
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Windows
+      versions:
+        - "2022"
+  galaxy_tags:
+    - windows
+    - powershell
+    - chocolatey
+    - workshop
+
+dependencies: []

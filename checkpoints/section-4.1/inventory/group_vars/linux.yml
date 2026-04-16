@@ -1,0 +1,18 @@
+---
+# =============================================================================
+# inventory/group_vars/linux.yml
+# =============================================================================
+# Variables that apply only to hosts in the 'linux' group.
+# =============================================================================
+
+# Use SSH for Linux. This is the default but spelled out for clarity.
+ansible_connection: ssh
+
+# Ubuntu 22.04+ ships with Python 3 at /usr/bin/python3. Setting this
+# explicitly avoids the "interpreter discovery" warning on every run.
+ansible_python_interpreter: /usr/bin/python3
+
+# The control node trusts the lab subnet for SSH, but new hosts may not be
+# in known_hosts yet. The workshop's ansible.cfg disables host key checking
+# for the same reason; this is a redundant safety net at the inventory level.
+ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'

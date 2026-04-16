@@ -1,0 +1,239 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+#
+# =============================================================================
+# Vagrantfile — Local fallback for the workshop lab
+# =============================================================================
+# Provisions the workshop's three VMs (control, web1, mgmt1) on a private
+# VirtualBox network. This is the path attendees use to recreate the lab on
+# their own laptop after the workshop, or for instructors who want to develop
+# against the workshop without burning Azure credit.
+#
+# Prerequisites: VirtualBox 7.x, Vagrant 2.4+, ~30 GB disk, 8+ GB RAM.
+#
+# Usage:
+#     vagrant up           # bring up all three VMs (first run: ~30 min download)
+#     vagrant ssh control  # SSH into the control node
+#     vagrant halt         # gracefully shut down
+#     vagrant destroy -f   # delete the VMs (preserves downloaded box files)
+#
+# After `vagrant up`, the lab is ready:
+#     vagrant ssh control
+#     cd ~/workshop
+#     ansible-playbook preflight/check.yml
+# =============================================================================
+
+# Network: 192.168.56.0/24 is the canonical VirtualBox host-only range.
+# We use static IPs in that range so the workshop's inventory file can refer
+# to hosts by IP without a DHCP step.
+NETWORK = "192.168.56"
+
+CONTROL_IP = "#{NETWORK}.10"
+WEB1_IP    = "#{NETWORK}.20"
+WEB2_IP    = "#{NETWORK}.21"
+MGMT1_IP   = "#{NETWORK}.30"
+
+# The lab credentials. Hardcoded because this is a local single-user lab,
+# not the workshop-day shared environment. The attendee is "vagrant" because
+# that's the default Vagrant box user; the password is also "vagrant".
+LAB_USER = "vagrant"
+LAB_PASS = "vagrant"
+
+# The Windows local admin password. Must satisfy Windows complexity rules.
+WIN_ADMIN_USER = "vagrant"
+WIN_ADMIN_PASS = "Passw0rd!"
+
+# Workshop repo URL — same as the Azure path
+WORKSHOP_REPO_URL = "https://github.com/jhoughes/ansible-branch-office-workshop-base.git"
+WORKSHOP_REPO_BRANCH = "main"
+
+Vagrant.configure("2") do |config|
+
+  # ---------------------------------------------------------------------------
+  # Global VirtualBox tuning
+  # ---------------------------------------------------------------------------
+  config.vm.provider "virtualbox" do |vb|
+    vb.linked_clone = true   # share the base box, save disk
+  end
+
+  # ---------------------------------------------------------------------------
+  # control: Ubuntu 22.04, the Ansible runtime
+  # ---------------------------------------------------------------------------
+  config.vm.define "control" do |control|
+    control.vm.box = "ubuntu/jammy64"
+    control.vm.hostname = "control"
+    control.vm.network "private_network", ip: CONTROL_IP
+
+    control.vm.provider "virtualbox" do |vb|
+      vb.name = "workshop-control"
+      vb.memory = 2048
+      vb.cpus = 2
+    end
+
+    # Provision the control node with Ansible, pywinrm, and the workshop repo.
+    # Equivalent to the cloud-init file used in the Azure path.
+    control.vm.provision "shell", inline: <<-SHELL
+      set -e
+
+      echo "==> Updating apt cache..."
+      apt-get update -qq
+
+      echo "==> Installing packages..."
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \\
+        ansible \\
+        python3-pip \\
+        python3-venv \\
+        git \\
+        jq \\
+        tree \\
+        vim \\
+        nano \\
+        tmux \\
+        sshpass
+
+      echo "==> Installing pywinrm..."
+      pip3 install --break-system-packages "pywinrm[kerberos]" requests
+
+      echo "==> Cloning workshop repo to /home/#{LAB_USER}/workshop..."
+      if [ ! -d /home/#{LAB_USER}/workshop ]; then
+        sudo -u #{LAB_USER} git clone \\
+          --branch #{WORKSHOP_REPO_BRANCH} \\
+          #{WORKSHOP_REPO_URL} \\
+          /home/#{LAB_USER}/workshop
+      else
+        echo "    Repo already exists, skipping clone."
+      fi
+
+      echo "==> Installing Ansible Galaxy collections from requirements.yml..."
+      # The repo's requirements.yml is the canonical source of which collections
+      # (and which pinned versions) the workshop needs. Installing from it
+      # rather than naming collections inline keeps the Vagrant and Azure
+      # provisioning paths in sync.
+      sudo -u #{LAB_USER} ansible-galaxy collection install \\
+        -r /home/#{LAB_USER}/workshop/requirements.yml
+
+      echo "==> Adding /etc/hosts entries for the lab..."
+      cat >> /etc/hosts <<HOSTS
+#{WEB1_IP}  web1
+#{WEB2_IP}  web2
+#{MGMT1_IP} mgmt1
+HOSTS
+
+      echo "==> Marker file for preflight check..."
+      touch /var/lib/cloud/workshop-bootstrap-complete || mkdir -p /var/lib/cloud && touch /var/lib/cloud/workshop-bootstrap-complete
+
+      echo "==> Done. Control node is ready."
+    SHELL
+  end
+
+  # ---------------------------------------------------------------------------
+  # web1: Ubuntu 22.04, the workshop's first target host
+  # ---------------------------------------------------------------------------
+  config.vm.define "web1" do |web1|
+    web1.vm.box = "ubuntu/jammy64"
+    web1.vm.hostname = "web1"
+    web1.vm.network "private_network", ip: WEB1_IP
+
+    web1.vm.provider "virtualbox" do |vb|
+      vb.name = "workshop-web1"
+      vb.memory = 1024
+      vb.cpus = 1
+    end
+
+    # web1 doesn't need any pre-provisioning — the workshop's own playbooks
+    # will install nginx, configure the firewall, etc. We only make sure
+    # Python is present so Ansible can connect.
+    web1.vm.provision "shell", inline: <<-SHELL
+      set -e
+      apt-get update -qq
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3
+    SHELL
+  end
+
+  # ---------------------------------------------------------------------------
+  # web2: Ubuntu 22.04, second web tier host (used in section 3.3 for the
+  # rolling deploy demo). Provisioned alongside web1 so the workshop's clock
+  # isn't burned on Vagrant provisioning during section 3.3 itself. Until
+  # section 3.3, the workshop's playbooks ignore web2.
+  # ---------------------------------------------------------------------------
+  config.vm.define "web2" do |web2|
+    web2.vm.box = "ubuntu/jammy64"
+    web2.vm.hostname = "web2"
+    web2.vm.network "private_network", ip: WEB2_IP
+
+    web2.vm.provider "virtualbox" do |vb|
+      vb.name = "workshop-web2"
+      vb.memory = 1024
+      vb.cpus = 1
+    end
+
+    web2.vm.provision "shell", inline: <<-SHELL
+      set -e
+      apt-get update -qq
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3
+    SHELL
+  end
+
+  # ---------------------------------------------------------------------------
+  # mgmt1: Windows Server 2022 Eval, the workshop's Windows target
+  # ---------------------------------------------------------------------------
+  config.vm.define "mgmt1" do |mgmt1|
+    # gusztavvargadr/windows-server is the most reliable community-maintained
+    # Windows Server 2022 box. License: 180-day Microsoft Eval. Suitable for
+    # learning and testing. Box size: ~7 GB to download on first run.
+    mgmt1.vm.box = "gusztavvargadr/windows-server"
+    mgmt1.vm.hostname = "mgmt1"
+    mgmt1.vm.network "private_network", ip: MGMT1_IP
+
+    # Vagrant talks to Windows boxes over WinRM, not SSH
+    mgmt1.vm.communicator = "winrm"
+    mgmt1.winrm.username = WIN_ADMIN_USER
+    mgmt1.winrm.password = WIN_ADMIN_PASS
+    mgmt1.winrm.transport = :negotiate
+    mgmt1.winrm.basic_auth_only = false
+
+    mgmt1.vm.provider "virtualbox" do |vb|
+      vb.name = "workshop-mgmt1"
+      vb.memory = 4096
+      vb.cpus = 2
+      # Windows on VirtualBox benefits from these tweaks
+      vb.customize ["modifyvm", :id, "--ioapic", "on"]
+      vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+    end
+
+    # Run the same WinRM bootstrap script the Azure path uses. Vagrant's
+    # base Windows box already has WinRM working enough for Vagrant itself
+    # to connect, but we need the additional configuration (HTTPS listener,
+    # firewall rule scoped to the lab subnet) that the bootstrap provides.
+    mgmt1.vm.provision "shell", path: "../azure/files/winrm-bootstrap.ps1"
+  end
+
+  # ---------------------------------------------------------------------------
+  # Post-up message
+  # ---------------------------------------------------------------------------
+  config.vm.post_up_message = <<-MSG
+
+    ========================================================
+    Workshop lab is up.
+
+    Hosts:
+      control:  #{CONTROL_IP}  (Ubuntu 22.04)
+      web1:     #{WEB1_IP}  (Ubuntu 22.04)
+      mgmt1:    #{MGMT1_IP}  (Windows Server 2022)
+
+    Get started:
+      vagrant ssh control
+      cd ~/workshop
+      ansible-playbook preflight/check.yml
+
+    The workshop credentials in this local lab are:
+      Linux SSH:           #{LAB_USER} / #{LAB_PASS}
+      Windows admin:       #{WIN_ADMIN_USER} / #{WIN_ADMIN_PASS}
+      Workshop Vault pass: branch-office-vault-2026
+
+    To shut down: vagrant halt
+    To delete:    vagrant destroy -f
+    ========================================================
+
+  MSG
+end

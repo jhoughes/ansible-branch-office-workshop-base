@@ -1,0 +1,13 @@
+---
+# =============================================================================
+# roles/webserver/handlers/main.yml
+# =============================================================================
+# Handlers for the webserver role. Handlers only fire if a task with a
+# matching `notify:` reported a change. They run once at the end of the
+# play, regardless of how many notifications they received.
+# =============================================================================
+
+- name: Reload nginx
+  ansible.builtin.service:
+    name: nginx
+    state: reloaded

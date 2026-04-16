@@ -1,0 +1,278 @@
+---
+# =============================================================================
+# roles/attendee-rg/tasks/main.yml
+# =============================================================================
+# Provisions a single attendee's complete lab environment in Azure.
+#
+# Inputs (from group_vars/all.yml and per-attendee inventory):
+#   - attendee_number       — e.g., "07" (zero-padded string)
+#   - azure_location        — e.g., "westus2"
+#   - vm_size_linux         — e.g., "Standard_B2s"
+#   - vm_size_windows       — e.g., "Standard_B2ms"
+#   - host_private_ips      — dict mapping role to private IP
+#   - allowed_ssh_sources   — list of CIDRs allowed inbound SSH
+#
+# Outputs (registered as facts on this attendee host so they can be picked up
+# by the credentials CSV template):
+#   - generated_ssh_password
+#   - generated_windows_password
+#   - control_public_ip
+# =============================================================================
+
+# Every Azure module call needs to run from localhost — the target VMs don't
+# exist yet, so there's nowhere else for the modules to run.
+- name: Provision attendee {{ attendee_number }}
+  delegate_to: localhost
+  block:
+
+    # ---------------------------------------------------------------------------
+    # Generate per-attendee passwords
+    # ---------------------------------------------------------------------------
+    # 16-char alphanumeric is sufficient for ephemeral lab credentials.
+    # The Linux SSH password and the Windows local admin password are
+    # generated independently so a leak of one doesn't compromise the other.
+    - name: Generate the attendee's SSH password
+      ansible.builtin.set_fact:
+        generated_ssh_password: "{{ lookup('password', '/dev/null length=16 chars=ascii_letters,digits') }}"
+
+    - name: Generate the Windows local admin password
+      ansible.builtin.set_fact:
+        generated_windows_password: "{{ lookup('password', '/dev/null length=20 chars=ascii_letters,digits,punctuation') }}"
+      # Windows requires more complexity than Linux, hence 20 chars + punctuation.
+
+    # ---------------------------------------------------------------------------
+    # Resource group
+    # ---------------------------------------------------------------------------
+    - name: Create the attendee resource group
+      azure.azcollection.azure_rm_resourcegroup:
+        name: "{{ resource_group_name }}"
+        location: "{{ azure_location }}"
+        tags: "{{ azure_tags }}"
+        state: present
+
+    # ---------------------------------------------------------------------------
+    # Networking: vnet, subnet, NSG
+    # ---------------------------------------------------------------------------
+    - name: Create the virtual network
+      azure.azcollection.azure_rm_virtualnetwork:
+        resource_group: "{{ resource_group_name }}"
+        name: "{{ workshop_name }}-vnet"
+        address_prefixes: "{{ vnet_address_space }}"
+        tags: "{{ azure_tags }}"
+
+    - name: Create the lab subnet
+      azure.azcollection.azure_rm_subnet:
+        resource_group: "{{ resource_group_name }}"
+        virtual_network: "{{ workshop_name }}-vnet"
+        name: lab
+        address_prefix: "{{ subnet_address_space }}"
+
+    - name: Create the network security group (allow SSH from conference IPs only)
+      azure.azcollection.azure_rm_securitygroup:
+        resource_group: "{{ resource_group_name }}"
+        name: "{{ workshop_name }}-nsg"
+        tags: "{{ azure_tags }}"
+        rules:
+          - name: AllowSshFromConference
+            protocol: Tcp
+            destination_port_range: "22"
+            source_address_prefix: "{{ allowed_ssh_sources }}"
+            access: Allow
+            priority: 100
+            direction: Inbound
+          # Note: no rules for HTTP, RDP, or WinRM. Attendees access those
+          # via SSH port forwarding through the control node, never directly.
+          # This is the jump-box pattern.
+
+    # ---------------------------------------------------------------------------
+    # Public IP (only the control node gets one)
+    # ---------------------------------------------------------------------------
+    - name: Create the public IP for the control node
+      azure.azcollection.azure_rm_publicipaddress:
+        resource_group: "{{ resource_group_name }}"
+        name: "control-pip"
+        allocation_method: Static
+        sku: Standard
+        tags: "{{ azure_tags }}"
+      register: control_pip
+
+    - name: Record the control node's public IP for the credentials CSV
+      ansible.builtin.set_fact:
+        control_public_ip: "{{ control_pip.state.ip_address }}"
+
+    # ---------------------------------------------------------------------------
+    # NICs: one per VM. Only the control NIC gets the public IP.
+    # ---------------------------------------------------------------------------
+    - name: Create NIC for control node (with public IP)
+      azure.azcollection.azure_rm_networkinterface:
+        resource_group: "{{ resource_group_name }}"
+        name: "control-nic"
+        virtual_network: "{{ workshop_name }}-vnet"
+        subnet: lab
+        security_group: "{{ workshop_name }}-nsg"
+        tags: "{{ azure_tags }}"
+        ip_configurations:
+          - name: ipconfig1
+            private_ip_address: "{{ host_private_ips.control }}"
+            private_ip_allocation_method: Static
+            public_ip_address_name: "control-pip"
+            primary: true
+
+    - name: Create NIC for web1 (private only)
+      azure.azcollection.azure_rm_networkinterface:
+        resource_group: "{{ resource_group_name }}"
+        name: "web1-nic"
+        virtual_network: "{{ workshop_name }}-vnet"
+        subnet: lab
+        tags: "{{ azure_tags }}"
+        ip_configurations:
+          - name: ipconfig1
+            private_ip_address: "{{ host_private_ips.web1 }}"
+            private_ip_allocation_method: Static
+            primary: true
+
+    - name: Create NIC for web2 (private only)
+      azure.azcollection.azure_rm_networkinterface:
+        resource_group: "{{ resource_group_name }}"
+        name: "web2-nic"
+        virtual_network: "{{ workshop_name }}-vnet"
+        subnet: lab
+        tags: "{{ azure_tags }}"
+        ip_configurations:
+          - name: ipconfig1
+            private_ip_address: "{{ host_private_ips.web2 }}"
+            private_ip_allocation_method: Static
+            primary: true
+
+    - name: Create NIC for mgmt1 (private only)
+      azure.azcollection.azure_rm_networkinterface:
+        resource_group: "{{ resource_group_name }}"
+        name: "mgmt1-nic"
+        virtual_network: "{{ workshop_name }}-vnet"
+        subnet: lab
+        tags: "{{ azure_tags }}"
+        ip_configurations:
+          - name: ipconfig1
+            private_ip_address: "{{ host_private_ips.mgmt1 }}"
+            private_ip_allocation_method: Static
+            primary: true
+
+    # ---------------------------------------------------------------------------
+    # VM: control (Ubuntu, public IP, runs cloud-init to set up Ansible)
+    # ---------------------------------------------------------------------------
+    - name: Render the cloud-init file for the control node
+      ansible.builtin.template:
+        src: cloud-init-control.yml.j2
+        dest: "/tmp/cloud-init-control-{{ attendee_number }}.yml"
+        mode: '0600'
+
+    - name: Create the control VM
+      azure.azcollection.azure_rm_virtualmachine:
+        resource_group: "{{ resource_group_name }}"
+        name: control
+        vm_size: "{{ vm_size_linux }}"
+        admin_username: "{{ attendee_ssh_username }}"
+        admin_password: "{{ generated_ssh_password }}"
+        ssh_password_enabled: true
+        network_interfaces: control-nic
+        managed_disk_type: Standard_LRS
+        os_disk_caching: ReadWrite
+        os_disk_name: control-osdisk
+        custom_data: "{{ lookup('file', '/tmp/cloud-init-control-' ~ attendee_number ~ '.yml') }}"
+        image: "{{ ubuntu_image }}"
+        tags: "{{ azure_tags | combine({'role': 'control'}) }}"
+
+    # ---------------------------------------------------------------------------
+    # VM: web1 (Ubuntu, private only, no special bootstrapping —
+    # the workshop's own playbooks will configure it)
+    # ---------------------------------------------------------------------------
+    - name: Create the web1 VM
+      azure.azcollection.azure_rm_virtualmachine:
+        resource_group: "{{ resource_group_name }}"
+        name: web1
+        vm_size: "{{ vm_size_linux }}"
+        admin_username: "{{ attendee_ssh_username }}"
+        admin_password: "{{ generated_ssh_password }}"
+        ssh_password_enabled: true
+        network_interfaces: web1-nic
+        managed_disk_type: Standard_LRS
+        os_disk_caching: ReadWrite
+        os_disk_name: web1-osdisk
+        image: "{{ ubuntu_image }}"
+        tags: "{{ azure_tags | combine({'role': 'web1'}) }}"
+      # Note: web1 uses the same SSH password as control. This is fine for the
+      # lab — attendees only ever SSH from control to web1, never directly from
+      # the internet (web1 has no public IP). The blast radius of a leaked
+      # password is bounded by the NSG rules.
+
+    # ---------------------------------------------------------------------------
+    # VM: web2 (Ubuntu, private only — second web tier host for section 3.3's
+    # rolling deploy demo. Provisioned at lab build time alongside web1 so the
+    # 4-hour workshop clock isn't burned on Azure provisioning during section
+    # 3.3 itself. Until section 3.3, the workshop's playbooks ignore web2.)
+    # ---------------------------------------------------------------------------
+    - name: Create the web2 VM
+      azure.azcollection.azure_rm_virtualmachine:
+        resource_group: "{{ resource_group_name }}"
+        name: web2
+        vm_size: "{{ vm_size_linux }}"
+        admin_username: "{{ attendee_ssh_username }}"
+        admin_password: "{{ generated_ssh_password }}"
+        ssh_password_enabled: true
+        network_interfaces: web2-nic
+        managed_disk_type: Standard_LRS
+        os_disk_caching: ReadWrite
+        os_disk_name: web2-osdisk
+        image: "{{ ubuntu_image }}"
+        tags: "{{ azure_tags | combine({'role': 'web2'}) }}"
+
+    # ---------------------------------------------------------------------------
+    # VM: mgmt1 (Windows Server 2022 Datacenter with Desktop Experience)
+    # ---------------------------------------------------------------------------
+    - name: Create the mgmt1 Windows VM
+      azure.azcollection.azure_rm_virtualmachine:
+        resource_group: "{{ resource_group_name }}"
+        name: mgmt1
+        vm_size: "{{ vm_size_windows }}"
+        admin_username: "{{ windows_admin_username }}"
+        admin_password: "{{ generated_windows_password }}"
+        os_type: Windows
+        network_interfaces: mgmt1-nic
+        managed_disk_type: StandardSSD_LRS  # Windows feels much better on SSD
+        os_disk_caching: ReadWrite
+        os_disk_name: mgmt1-osdisk
+        image: "{{ windows_image }}"
+        tags: "{{ azure_tags | combine({'role': 'mgmt1'}) }}"
+
+    # ---------------------------------------------------------------------------
+    # WinRM bootstrap on mgmt1: run the PS1 script via the Custom Script Extension
+    # ---------------------------------------------------------------------------
+    - name: Configure WinRM on the Windows VM via the Custom Script Extension
+      azure.azcollection.azure_rm_virtualmachineextension:
+        resource_group: "{{ resource_group_name }}"
+        virtual_machine_name: mgmt1
+        name: winrm-bootstrap
+        publisher: Microsoft.Compute
+        virtual_machine_extension_type: CustomScriptExtension
+        type_handler_version: "1.10"
+        auto_upgrade_minor_version: true
+        settings:
+          fileUris:
+            # The bootstrap script is uploaded to a public gist or Azure storage
+            # before workshop day. The repo's copy is the source of truth;
+            # this URL is just a delivery mechanism. See files/winrm-bootstrap.ps1.
+            # For workshop day, host this on a stable URL the Azure VM can reach.
+            - "{{ winrm_bootstrap_script_url }}"
+          commandToExecute: "powershell -ExecutionPolicy Unrestricted -File winrm-bootstrap.ps1"
+      # Tagging this is optional — extensions inherit the parent VM's tags.
+
+    # ---------------------------------------------------------------------------
+    # Final per-attendee summary (printed during the run for visibility)
+    # ---------------------------------------------------------------------------
+    - name: Show what was created for this attendee
+      ansible.builtin.debug:
+        msg: |
+          Attendee {{ attendee_number }}:
+            Control node:  {{ control_public_ip }}  (SSH user: {{ attendee_ssh_username }})
+            Web private:   {{ host_private_ips.web1 }}
+            Mgmt private:  {{ host_private_ips.mgmt1 }}

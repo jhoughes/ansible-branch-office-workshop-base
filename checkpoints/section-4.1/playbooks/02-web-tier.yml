@@ -1,0 +1,125 @@
+---
+# =============================================================================
+# playbooks/02-web-tier.yml
+# =============================================================================
+# The first real workshop playbook. Installs and configures nginx on the
+# Linux web server, then deploys a Jinja2-templated status page that shows
+# the branch office information and the server's own facts.
+#
+# This is the centerpiece of section 2.1. It introduces:
+#   - Package management with apt
+#   - Services (systemd via the service module)
+#   - Config files via template (with a handler to reload on change)
+#   - Jinja2 templates with variable substitution AND fact access
+#   - Firewall rules via ufw
+#   - Handlers (the "reload nginx if config changed" pattern)
+#
+# By the end of this playbook, http://localhost:8080 in the attendee's
+# browser (via the port forward from section 1.4) shows the branch office
+# status page.
+#
+# Run it:
+#     ansible-playbook playbooks/02-web-tier.yml
+# =============================================================================
+
+- name: Configure the branch office web tier
+  hosts: web1
+  become: true
+
+  # Variables local to this play. The nginx-related settings are here
+  # because they don't belong in inventory/group_vars — they're specific
+  # to this one playbook, not the workshop as a whole.
+  vars:
+    nginx_listen_port: 80
+    nginx_document_root: /var/www/branch-office
+    nginx_site_name: branch-office
+
+  tasks:
+
+    # -------------------------------------------------------------------------
+    # Install nginx
+    # -------------------------------------------------------------------------
+    - name: Install nginx
+      ansible.builtin.apt:
+        name: nginx
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    # -------------------------------------------------------------------------
+    # Prepare the document root directory
+    # -------------------------------------------------------------------------
+    - name: Create the document root directory
+      ansible.builtin.file:
+        path: "{{ nginx_document_root }}"
+        state: directory
+        owner: www-data
+        group: www-data
+        mode: '0755'
+
+    # -------------------------------------------------------------------------
+    # Deploy the status page from the Jinja2 template
+    # -------------------------------------------------------------------------
+    # This is the star of the show for section 2.1. The template uses a mix
+    # of workshop variables (branch_id, branch_location, etc.) from
+    # inventory/group_vars/all.yml AND Ansible facts (ansible_hostname,
+    # ansible_distribution, etc.) gathered from the target host.
+    - name: Deploy the branch office status page from template
+      ansible.builtin.template:
+        src: ../templates/status.html.j2
+        dest: "{{ nginx_document_root }}/index.html"
+        owner: www-data
+        group: www-data
+        mode: '0644'
+
+    # -------------------------------------------------------------------------
+    # Deploy the nginx site config
+    # -------------------------------------------------------------------------
+    - name: Deploy the nginx site config from template
+      ansible.builtin.template:
+        src: ../templates/nginx-site.conf.j2
+        dest: "/etc/nginx/sites-available/{{ nginx_site_name }}"
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Reload nginx   # handler defined below — only fires if the file changed
+
+    - name: Enable the branch office site
+      ansible.builtin.file:
+        src: "/etc/nginx/sites-available/{{ nginx_site_name }}"
+        dest: "/etc/nginx/sites-enabled/{{ nginx_site_name }}"
+        state: link
+      notify: Reload nginx
+
+    - name: Remove the default nginx site
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      notify: Reload nginx
+
+    # -------------------------------------------------------------------------
+    # Firewall: allow HTTP
+    # -------------------------------------------------------------------------
+    - name: Allow HTTP through ufw
+      community.general.ufw:
+        rule: allow
+        port: "{{ nginx_listen_port }}"
+        proto: tcp
+
+    # -------------------------------------------------------------------------
+    # Ensure nginx is running and enabled at boot
+    # -------------------------------------------------------------------------
+    - name: Ensure nginx is started and enabled
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true
+
+  # ---------------------------------------------------------------------------
+  # Handlers — only run if a task with 'notify' reported a change
+  # ---------------------------------------------------------------------------
+  handlers:
+    - name: Reload nginx
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded

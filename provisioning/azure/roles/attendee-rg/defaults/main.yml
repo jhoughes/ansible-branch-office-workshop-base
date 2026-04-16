@@ -1,0 +1,35 @@
+---
+# =============================================================================
+# roles/attendee-rg/defaults/main.yml
+# =============================================================================
+# Defaults for the attendee-rg role. Most of these are pulled from
+# group_vars/all.yml; the values here are role-local fallbacks for the few
+# things that don't belong at the global level.
+# =============================================================================
+
+# URL where the WinRM bootstrap script is hosted. The Azure Custom Script
+# Extension fetches the script from a URL — it can't use a local file.
+#
+# Recommended approach: GitHub Gist
+# ---------------------------------
+# Create a public gist containing winrm-bootstrap.ps1 (copy the contents from
+# provisioning/azure/files/winrm-bootstrap.ps1) and grab its raw URL. Use the
+# COMMIT-PINNED form, not the "latest" form, so the URL doesn't silently
+# change if you edit the gist.
+#
+# To get the commit-pinned URL:
+#   1. Create the gist at https://gist.github.com (public, single file)
+#   2. Click the "Raw" button on the gist's file view
+#   3. The URL will look like:
+#      https://gist.githubusercontent.com/USERNAME/GISTID/raw/SHA/winrm-bootstrap.ps1
+#   4. Use that exact URL — the SHA pins to that revision
+#
+# Update the gist any time you change the script, then update this variable
+# with the new commit-pinned URL.
+#
+# Alternative: Azure Blob Storage with a SAS token (more setup, but works
+# for private/proprietary content).
+#
+# Override at the command line for one-off testing:
+#   ansible-playbook site.yml -e "winrm_bootstrap_script_url=https://your-url"
+winrm_bootstrap_script_url: "https://gist.githubusercontent.com/REPLACE_WITH_YOUR_GIST_USERNAME/REPLACE_WITH_GIST_ID/raw/REPLACE_WITH_COMMIT_SHA/winrm-bootstrap.ps1"

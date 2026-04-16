@@ -1,0 +1,93 @@
+# =============================================================================
+# inventory/attendees.yml
+# =============================================================================
+# The list of attendees the workshop will be provisioning labs for.
+#
+# Edit this file before running site.yml. The default below is a 20-attendee
+# workshop with sequential numbering, which is the planned config for the
+# next workshop run.
+#
+# Each attendee entry just needs an attendee_number. Names are optional —
+# they're only used for the printed cards if you want personalized cards.
+#
+# After provisioning, each attendee will have:
+#   - A resource group named "workshop-att-NN-rg"
+#   - A control node accessible at the public IP recorded in attendee-credentials.csv
+#   - A web1 host at 10.NN.0.10 (private IP, only reachable through control)
+#   - A mgmt1 host at 10.NN.0.20 (private IP, only reachable through control)
+#
+# To add more attendees: just add more entries. To remove: comment out or delete.
+# To do a single test run: use --limit on the ansible-playbook command.
+# =============================================================================
+
+all:
+  vars:
+    # Connection settings — these only apply to the post-provisioning verify
+    # step. The actual provisioning happens via the Azure modules and doesn't
+    # SSH to the attendee VMs.
+    ansible_user: attendee
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+
+  children:
+    attendees:
+      hosts:
+        # Default 20 attendees, numbered 01-20.
+        # The Azure resource group for each will be "workshop-att-NN-rg".
+        attendee01:
+          attendee_number: "01"
+        attendee02:
+          attendee_number: "02"
+        attendee03:
+          attendee_number: "03"
+        attendee04:
+          attendee_number: "04"
+        attendee05:
+          attendee_number: "05"
+        attendee06:
+          attendee_number: "06"
+        attendee07:
+          attendee_number: "07"
+        attendee08:
+          attendee_number: "08"
+        attendee09:
+          attendee_number: "09"
+        attendee10:
+          attendee_number: "10"
+        attendee11:
+          attendee_number: "11"
+        attendee12:
+          attendee_number: "12"
+        attendee13:
+          attendee_number: "13"
+        attendee14:
+          attendee_number: "14"
+        attendee15:
+          attendee_number: "15"
+        attendee16:
+          attendee_number: "16"
+        attendee17:
+          attendee_number: "17"
+        attendee18:
+          attendee_number: "18"
+        attendee19:
+          attendee_number: "19"
+        attendee20:
+          attendee_number: "20"
+
+        # ---------------------------------------------------------------------
+        # Optional: walk-up / standby attendees beyond the registered count.
+        # Uncomment if your conference has open seating or you expect overflow.
+        # ---------------------------------------------------------------------
+        # attendee21:
+        #   attendee_number: "21"
+        # attendee22:
+        #   attendee_number: "22"
+
+        # ---------------------------------------------------------------------
+        # Optional: instructor / capture-pass attendee.
+        # Use this for the lab build / capture pass before the workshop, so the
+        # capture lab is clearly distinct from the real attendee labs.
+        # Provision with: ansible-playbook site.yml --limit instructor
+        # ---------------------------------------------------------------------
+        instructor:
+          attendee_number: "99"

@@ -1,0 +1,51 @@
+---
+# =============================================================================
+# inventory/group_vars/windows.yml
+# =============================================================================
+# Variables that apply only to hosts in the 'windows' group.
+# This is the file that makes the Windows half of the workshop work. If
+# Ansible can't reach mgmt1 over WinRM, the variables in this file are the
+# first thing to check.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Connection: WinRM over HTTPS
+# -----------------------------------------------------------------------------
+# The workshop's Windows VM (mgmt1) was bootstrapped with the WinRM HTTPS
+# listener on port 5986 by the winrm-bootstrap.ps1 script that ran during
+# Azure provisioning. These variables tell Ansible how to talk to it.
+ansible_connection: winrm
+ansible_port: 5986
+ansible_winrm_transport: basic
+ansible_winrm_scheme: https
+
+# Skip server certificate validation. The bootstrap script generates a
+# self-signed certificate, so we can't validate it against a CA. In
+# production, use a CA-signed cert and set this to 'validate'.
+ansible_winrm_server_cert_validation: ignore
+
+# Bump up the read timeout — some Windows operations (especially win_updates
+# and large package installs via win_chocolatey) can take a while to return.
+ansible_winrm_read_timeout_sec: 70
+ansible_winrm_operation_timeout_sec: 60
+
+# -----------------------------------------------------------------------------
+# Credentials
+# -----------------------------------------------------------------------------
+# The Windows VM's local admin credentials. These were generated per-attendee
+# by the provisioning playbook and are printed on each attendee's card.
+#
+# Attendees: replace these with the credentials from your card.
+# The username is always 'workshop_admin'. The password is the generated
+# 18-character string on your card (the one labeled "Windows admin password").
+#
+# DO NOT commit a real password to this file. The values below are
+# placeholders. Override them at runtime via:
+#   ansible-playbook playbook.yml -e "ansible_password=YOUR_WINDOWS_PASSWORD"
+# OR by editing this file locally on your control node (the file is in
+# the workshop's .gitignore-equivalent for sensitive overrides).
+#
+# In the workshop environment, attendees will be walked through replacing
+# these placeholders during section 1.4 (right after the preflight check).
+ansible_user: workshop_admin
+ansible_password: REPLACE_ME_WITH_PASSWORD_FROM_YOUR_CARD

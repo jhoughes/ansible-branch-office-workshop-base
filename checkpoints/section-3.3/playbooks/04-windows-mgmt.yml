@@ -1,0 +1,29 @@
+---
+# =============================================================================
+# playbooks/04-windows-mgmt.yml
+# =============================================================================
+# Configures the Windows Server 2022 management host (mgmt1) by applying
+# the windows-mgmt role.
+#
+# This is the section 2.3 centerpiece. The role will:
+#   - Install Chocolatey
+#   - Install VS Code, Notepad++, 7-Zip, and PowerShell 7 via Chocolatey
+#   - Create a "BranchOfficeIT" local group
+#   - Create two local users (alice.jones, bob.smith) and add them to the group
+#   - Create a "BranchOfficeShared" SMB share with full access for the group
+#   - Open the firewall for SMB
+#   - Run a custom PowerShell inventory report and capture the structured output
+#
+# Run it:
+#     ansible-playbook playbooks/04-windows-mgmt.yml
+#
+# First run will take 5-10 minutes because Chocolatey downloads and installs
+# four real packages. Subsequent runs are much faster (everything is idempotent).
+# =============================================================================
+
+- name: Configure the branch office Windows management host
+  hosts: mgmt1
+  gather_facts: true   # we use ansible_facts indirectly via debug messages
+
+  roles:
+    - windows-mgmt

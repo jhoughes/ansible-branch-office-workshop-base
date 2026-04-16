@@ -1,0 +1,91 @@
+---
+# =============================================================================
+# playbooks/06-rolling-deploy.yml
+# =============================================================================
+# Demonstrates Ansible's rolling deployment pattern: take one host out of
+# service at a time, apply changes to it, verify, return it to service,
+# move on to the next.
+#
+# Real-world version: there's a load balancer in front of the web tier, and
+# the pre/post tasks call the LB's API to drain/return the host. The lab
+# doesn't have a load balancer (keeping the workshop scoped) so we simulate
+# the LB integration with debug messages — the *pattern* is the lesson, not
+# the LB integration itself.
+#
+# Key patterns demonstrated:
+#   - serial: 1 — process hosts one at a time, not in parallel
+#   - max_fail_percentage: 0 — stop the entire run if ANY host fails (safer
+#     for production deploys than the default of "continue past failures")
+#   - pre_tasks — run BEFORE the role tasks (used for "drain from LB")
+#   - post_tasks — run AFTER the role tasks (used for "return to LB")
+#   - any_errors_fatal: true — same idea as max_fail_percentage at play scope
+#
+# Run it:
+#     ansible-playbook playbooks/06-rolling-deploy.yml
+#
+# Watch carefully: web1 finishes ALL its tasks (drain, role, return) before
+# web2 starts ANY of its tasks. That's serial: 1 in action.
+# =============================================================================
+
+- name: Rolling deploy of web tier — one host at a time
+  hosts: webservers
+  become: true
+  serial: 1
+  max_fail_percentage: 0
+
+  pre_tasks:
+    # In production, this would call your load balancer's API to drain the
+    # host: AWS ELB DeregisterTargets, F5 disable pool member, HAProxy
+    # admin socket "set server X state maint", etc. The lab has no LB, so
+    # we just narrate what would happen.
+    - name: "Drain {{ inventory_hostname }} from the load balancer (simulated)"
+      ansible.builtin.debug:
+        msg: |
+          → would call LB API now to remove {{ inventory_hostname }} from rotation.
+          → would wait for in-flight connections to drain (typically 30-60s).
+          → for the lab, we skip the wait and continue immediately.
+
+    # Real LB integrations would have something like:
+    #   - name: Drain {{ inventory_hostname }} from HAProxy
+    #     community.general.haproxy:
+    #       state: disabled
+    #       host: "{{ inventory_hostname }}"
+    #       socket: /var/run/haproxy.sock
+    #     delegate_to: load-balancer-host
+
+    - name: "Confirm {{ inventory_hostname }} is out of rotation (simulated)"
+      ansible.builtin.debug:
+        msg: |
+          → would poll LB until {{ inventory_hostname }} shows as DOWN/drained.
+          → fail the play if it doesn't drain within timeout (rolling-back-friendly).
+
+  roles:
+    - webserver
+
+  post_tasks:
+    # After applying the role, confirm the local nginx is healthy BEFORE
+    # we return the host to the LB. If this check fails, the LB never
+    # receives traffic for the broken host. This is the rolling deploy
+    # safety property: a bad change doesn't take down all your hosts.
+    - name: "Confirm nginx on {{ inventory_hostname }} is responding"
+      ansible.builtin.uri:
+        url: "http://localhost/health"
+        return_content: true
+        status_code: 200
+      register: health_check
+      retries: 5
+      delay: 2
+      until: health_check.status == 200
+
+    - name: "Show what {{ inventory_hostname }}'s health endpoint returned"
+      ansible.builtin.debug:
+        msg: "Health check on {{ inventory_hostname }}: {{ health_check.content | trim }}"
+
+    # In production, this would call the LB API to return the host:
+    # AWS ELB RegisterTargets, F5 enable pool member, etc.
+    - name: "Return {{ inventory_hostname }} to the load balancer (simulated)"
+      ansible.builtin.debug:
+        msg: |
+          → would call LB API now to add {{ inventory_hostname }} back to rotation.
+          → would poll LB until {{ inventory_hostname }} shows as UP/healthy.
+          → only THEN move on to the next host in the serial: 1 loop.

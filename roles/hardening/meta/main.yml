@@ -1,0 +1,22 @@
+---
+galaxy_info:
+  role_name: hardening
+  author: Joe Houghes and Mike Nelson
+  description: |
+    Cross-platform baseline hardening role. Detects Linux vs Windows and
+    applies the appropriate security baseline, structured around the "First
+    5 Minutes Server Security" 9-item checklist. Built for the Ansible
+    Branch Office Workshop.
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions: [jammy]
+    - name: Windows
+      versions: ["2022"]
+  galaxy_tags:
+    - security
+    - hardening
+    - workshop
+
+dependencies: []

@@ -1,0 +1,133 @@
+---
+# =============================================================================
+# roles/hardening/tasks/windows.yml
+# =============================================================================
+# Baseline Windows hardening. The Windows side of the same 9-item checklist
+# as linux.yml — same numbering so attendees can follow along visually.
+#
+# Several items don't have a perfect Windows equivalent (e.g., SSH config),
+# so we substitute the closest Windows analog (RDP NLA, account lockout
+# policy, etc.) and label clearly.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 1. Use secure encrypted communications: enforce RDP NLA
+# -----------------------------------------------------------------------------
+- name: "Item 1: Require Network Level Authentication for RDP"
+  ansible.windows.win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp
+    name: UserAuthentication
+    data: 1
+    type: dword
+
+# -----------------------------------------------------------------------------
+# 2. Disable the built-in Administrator account (no remote login as 'Administrator')
+# -----------------------------------------------------------------------------
+# We don't actually disable it in the workshop because workshop_admin IS the
+# built-in admin account on the lab images. Production hardening: rename it
+# AND disable it, then create a separate named admin account.
+- name: "Item 2: (lab note) In production, rename and disable the built-in Administrator account"
+  ansible.builtin.debug:
+    msg: |
+      In a production hardening run, this would:
+        1. Rename Administrator to a non-default name
+        2. Disable the renamed account
+        3. Ensure a separate named admin account exists with sudo-equivalent rights
+      We skip this in the lab because the lab uses workshop_admin AS the built-in admin.
+
+# -----------------------------------------------------------------------------
+# 3. Remove unused features (Telnet, SMBv1)
+# -----------------------------------------------------------------------------
+- name: "Item 3: Disable SMBv1 (legacy, insecure)"
+  ansible.windows.win_optional_feature:
+    name: SMB1Protocol
+    state: absent
+
+- name: "Item 3: Ensure Telnet client is not installed"
+  ansible.windows.win_optional_feature:
+    name: TelnetClient
+    state: absent
+
+# -----------------------------------------------------------------------------
+# 4. Apply principle of least privilege: enforce account lockout policy
+# -----------------------------------------------------------------------------
+- name: "Item 4: Set account lockout threshold (5 failed attempts)"
+  ansible.windows.win_security_policy:
+    section: System Access
+    key: LockoutBadCount
+    value: 5
+
+- name: "Item 4: Set account lockout duration (15 minutes)"
+  ansible.windows.win_security_policy:
+    section: System Access
+    key: LockoutDuration
+    value: 15
+
+- name: "Item 4: Set lockout observation window (15 minutes)"
+  ansible.windows.win_security_policy:
+    section: System Access
+    key: ResetLockoutCount
+    value: 15
+
+# -----------------------------------------------------------------------------
+# 5. Automate updates (Windows Update settings — set to download but not auto-install,
+#    leaving install timing to admin discretion)
+# -----------------------------------------------------------------------------
+- name: "Item 5: Configure Windows Update to download updates automatically"
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU
+    name: AUOptions
+    data: 3
+    type: dword
+    state: present
+  # AUOptions: 2=notify only, 3=auto download notify install, 4=auto everything
+  # We pick 3 — good balance of "stay current" and "don't reboot mid-meeting".
+
+# -----------------------------------------------------------------------------
+# 6. Configure the firewall: ensure all three Windows Firewall profiles
+#    are enabled and the workshop's known rules are in place
+# -----------------------------------------------------------------------------
+- name: "Item 6: Ensure all Windows Firewall profiles are enabled"
+  community.windows.win_firewall:
+    state: enabled
+    profiles:
+      - Domain
+      - Private
+      - Public
+
+# -----------------------------------------------------------------------------
+# 7. Ensure auditing is enabled for logon events
+# -----------------------------------------------------------------------------
+- name: "Item 7: Enable auditing for successful and failed logons"
+  ansible.windows.win_audit_policy_system:
+    subcategory: Logon
+    audit_type: success, failure
+
+# -----------------------------------------------------------------------------
+# 8. Monitor login attempts (Windows: enforce minimum password length)
+# -----------------------------------------------------------------------------
+- name: "Item 8: Set minimum password length to 12 characters"
+  ansible.windows.win_security_policy:
+    section: System Access
+    key: MinimumPasswordLength
+    value: 12
+
+- name: "Item 8: Enforce password complexity"
+  ansible.windows.win_security_policy:
+    section: System Access
+    key: PasswordComplexity
+    value: 1
+
+# -----------------------------------------------------------------------------
+# 9. Mandatory access control (Windows: ensure UAC is enabled at the highest level)
+# -----------------------------------------------------------------------------
+- name: "Item 9: Ensure UAC is enabled and set to highest level"
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System
+    name: "{{ item.name }}"
+    data: "{{ item.data }}"
+    type: dword
+  loop:
+    - { name: EnableLUA, data: 1 }
+    - { name: ConsentPromptBehaviorAdmin, data: 2 }
+    - { name: PromptOnSecureDesktop, data: 1 }

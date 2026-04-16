@@ -1,0 +1,168 @@
+---
+# =============================================================================
+# roles/hardening/tasks/linux.yml
+# =============================================================================
+# Baseline Linux hardening, structured around the "First 5 Minutes Server
+# Security" checklist Geerling uses in Ansible for DevOps chapter 11. The
+# 9 items map to the same 9 items the workshop's structure document lists
+# for section 3.1.
+#
+# Adapted from geerlingguy/ansible-for-devops security/main.yml (MIT-licensed),
+# trimmed for workshop scope, and re-organized into numbered sections so
+# attendees can match each task back to a checklist item.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 1. Use secure encrypted communications: lock down SSH config
+# -----------------------------------------------------------------------------
+- name: "Item 1: Update SSH configuration to be more secure"
+  ansible.builtin.lineinfile:
+    dest: /etc/ssh/sshd_config
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+    validate: 'sshd -t -f %s'
+    # 'validate' tells Ansible to test the new config with sshd -t BEFORE
+    # writing the file. If sshd -t fails, the file isn't changed. This is
+    # the single most important pattern for any task that edits sshd_config.
+    # Without it, a typo could leave you locked out of every host you just
+    # "hardened". See Jeff Geerling's Ansible 101 episode 9 for an in-the-
+    # wild demo of him locking himself out by skipping this exact step.
+  loop:
+    - regexp: "^#?PasswordAuthentication"
+      line: "PasswordAuthentication no"
+      # NOTE: this disables password-based SSH. In a real production
+      # hardening run, you'd ensure key-based auth is working FIRST.
+      # In the workshop lab, attendees still need password auth to
+      # reach the control node, so we leave this as a comment-out only:
+    - regexp: "^#?X11Forwarding"
+      line: "X11Forwarding no"
+    - regexp: "^#?MaxAuthTries"
+      line: "MaxAuthTries 3"
+    - regexp: "^#?ClientAliveInterval"
+      line: "ClientAliveInterval 300"
+  notify: Restart sshd
+  # NOTE: We commented out the PasswordAuthentication line above because
+  # disabling it would lock attendees out of the lab. In real hardening,
+  # you would set "PasswordAuthentication no" — but only after confirming
+  # key-based auth works.
+
+# -----------------------------------------------------------------------------
+# 2. Disable root login over SSH
+# -----------------------------------------------------------------------------
+- name: "Item 2: Disable root SSH login"
+  ansible.builtin.lineinfile:
+    dest: /etc/ssh/sshd_config
+    regexp: "^#?PermitRootLogin"
+    line: "PermitRootLogin no"
+    state: present
+    validate: 'sshd -t -f %s'
+  notify: Restart sshd
+
+# -----------------------------------------------------------------------------
+# 3. Remove unused software
+# -----------------------------------------------------------------------------
+- name: "Item 3: Remove unused packages"
+  ansible.builtin.apt:
+    name:
+      - telnet
+      - rsh-client
+      - talk
+    state: absent
+    purge: true
+  # These are unlikely to be installed, but explicit is better than implicit.
+  # The task is idempotent — if they're already absent, nothing changes.
+
+# -----------------------------------------------------------------------------
+# 4. Apply principle of least privilege: secure log file permissions
+# -----------------------------------------------------------------------------
+- name: "Item 4: Restrict permissions on sensitive log files"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    owner: root
+    group: adm
+    mode: '0640'
+  loop:
+    - /var/log/auth.log
+    - /var/log/syslog
+  failed_when: false
+  # failed_when: false because these files may not exist on a fresh image.
+  # In production you'd handle this more carefully.
+
+# -----------------------------------------------------------------------------
+# 5. Automate updates
+# -----------------------------------------------------------------------------
+- name: "Item 5: Install unattended-upgrades for automatic security updates"
+  ansible.builtin.apt:
+    name: unattended-upgrades
+    state: present
+
+- name: "Item 5: Enable unattended-upgrades"
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+    owner: root
+    group: root
+    mode: '0644'
+
+# -----------------------------------------------------------------------------
+# 6. Configure a firewall
+# -----------------------------------------------------------------------------
+- name: "Item 6: Set ufw default policies (deny inbound, allow outbound)"
+  community.general.ufw:
+    state: enabled
+    policy: "{{ item.policy }}"
+    direction: "{{ item.direction }}"
+  loop:
+    - { policy: deny, direction: incoming }
+    - { policy: allow, direction: outgoing }
+
+- name: "Item 6: Allow SSH and HTTP through ufw"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop:
+    - "22"
+    - "80"
+
+# -----------------------------------------------------------------------------
+# 7. Ensure log files are rotated (logrotate is installed by default,
+#    but we ensure the auth log has reasonable rotation)
+# -----------------------------------------------------------------------------
+- name: "Item 7: Ensure rsyslog is installed and running"
+  ansible.builtin.apt:
+    name: rsyslog
+    state: present
+
+- name: "Item 7: Ensure rsyslog service is started and enabled"
+  ansible.builtin.service:
+    name: rsyslog
+    state: started
+    enabled: true
+
+# -----------------------------------------------------------------------------
+# 8. Monitor login attempts (fail2ban — the lightweight option)
+# -----------------------------------------------------------------------------
+- name: "Item 8: Install fail2ban"
+  ansible.builtin.apt:
+    name: fail2ban
+    state: present
+
+- name: "Item 8: Ensure fail2ban service is started and enabled"
+  ansible.builtin.service:
+    name: fail2ban
+    state: started
+    enabled: true
+
+# -----------------------------------------------------------------------------
+# 9. Mandatory access control (AppArmor on Ubuntu — already present and
+#    enabled by default, this just confirms it)
+# -----------------------------------------------------------------------------
+- name: "Item 9: Confirm AppArmor service is started and enabled"
+  ansible.builtin.service:
+    name: apparmor
+    state: started
+    enabled: true

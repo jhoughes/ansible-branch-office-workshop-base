@@ -1,0 +1,98 @@
+---
+# =============================================================================
+# playbooks/broken/broken-web-deploy.yml
+# =============================================================================
+# DELIBERATELY BROKEN. This playbook contains FIVE distinct bugs that
+# attendees diagnose during section 4.1 using Ansible's debugging tools.
+#
+# Don't just read the bugs — work through them with --check, --diff, -vvv,
+# --start-at-task, and --step as the lab guide describes. The point is the
+# diagnostic workflow, not the answer.
+#
+# All five bugs are listed in LAB-4.1.md (in the "answer key" section at
+# the bottom). Try diagnosing first; check the answer key only if stuck.
+# =============================================================================
+
+- name: Broken web tier deploy — diagnose what's wrong
+  hosts: web1
+  become: true
+
+  vars:
+    deploy_version: "2.4.7"
+    backup_dir: /var/www/backups
+
+  tasks:
+
+    # -------------------------------------------------------------------------
+    # Task 1: Make a backup of the current document root
+    # -------------------------------------------------------------------------
+    - name: Ensure backup directory exists
+      ansible.builtin.file:
+        path: "{{ backup_dir }}"
+        state: directory
+        owner: www-data
+        group: www-data
+        mode: '0755'
+
+    - name: Back up current index.html with version stamp
+      ansible.builtin.copy:
+        src: /var/www/branch-office/index.html
+        dest: "{{ backup_dir }}/index.html.{{ deploy_version }}"
+        remote_src: true
+        owner: www-data
+        group: www-data
+        mode: '0644'
+
+    # -------------------------------------------------------------------------
+    # Task 2: Drop a new "deployed by" marker file
+    # -------------------------------------------------------------------------
+    - name: Drop the deployment marker file
+      ansible.builtin.copy:
+        content: "Deployed version {{ deploy_version }} on {{ ansible_date_time.iso8601 }}\n"
+        dest: /var/www/branch-office/.deployed
+        owner: www-data
+        group: www-data
+        mode: '0644'
+
+    # -------------------------------------------------------------------------
+    # Task 3: Update the nginx site config with a new cache header
+    # -------------------------------------------------------------------------
+    - name: Add cache-control header to nginx site config
+      ansible.builtin.lineinfile:
+        path: /etc/nginx/sites-availble/branch-office
+        regexp: '^\s*add_header Cache-Control'
+        line: '    add_header Cache-Control "public, max-age=300" always;'
+        insertafter: '^\s*add_header X-Content-Type-Options'
+        state: present
+      notify: Reload nginx
+
+    # -------------------------------------------------------------------------
+    # Task 4: Confirm nginx is healthy after the change
+    # -------------------------------------------------------------------------
+    - name: Wait for nginx to come back up
+      ansible.builtin.uri:
+        url: "http://localhost:8080/health"
+        status_code: 200
+      register: health
+      retries: 5
+      delay: 2
+
+    - name: Show health check result
+      ansible.builtin.debug:
+        var: health.status
+
+    # -------------------------------------------------------------------------
+    # Task 5: Update the branch metadata
+    # -------------------------------------------------------------------------
+    - name: Update the branch_id in the workshop metadata
+      ansible.builtin.lineinfile:
+        path: /home/attendee/workshop/inventory/group_vars/all.yml
+        regexp: '^branch_id:'
+        line: 'branch_id: "BR-DEPLOYED-{{ deploy_version }}"'
+        state: present
+
+  handlers:
+    - name: Reload nginx
+      ansible.builtin.service:
+        name: ngnix
+        state: reloaded

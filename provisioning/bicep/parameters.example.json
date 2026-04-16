@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "attendeeNumber": {
+      "value": "01"
+    },
+    "location": {
+      "value": "westus2"
+    },
+    "workshopName": {
+      "value": "workshop"
+    },
+    "sshUsername": {
+      "value": "attendee"
+    },
+    "sshPassword": {
+      "value": "REPLACE_WITH_GENERATED_PASSWORD"
+    },
+    "windowsAdminUsername": {
+      "value": "workshop_admin"
+    },
+    "windowsAdminPassword": {
+      "value": "REPLACE_WITH_GENERATED_PASSWORD"
+    },
+    "allowedSshSources": {
+      "value": [
+        "0.0.0.0/0"
+      ]
+    },
+    "vmSizeLinux": {
+      "value": "Standard_B2s"
+    },
+    "vmSizeWindows": {
+      "value": "Standard_B2ms"
+    },
+    "winrmBootstrapScriptUrl": {
+      "value": "https://gist.githubusercontent.com/REPLACE_WITH_YOUR_GIST_USERNAME/REPLACE_WITH_GIST_ID/raw/REPLACE_WITH_COMMIT_SHA/winrm-bootstrap.ps1"
+    },
+    "cloudInitBase64": {
+      "value": "REPLACE_WITH_BASE64_ENCODED_CLOUD_INIT"
+    },
+    "workshopDate": {
+      "value": "2026-12-31"
+    }
+  }
+}

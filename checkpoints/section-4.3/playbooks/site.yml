@@ -1,0 +1,64 @@
+---
+# =============================================================================
+# playbooks/site.yml
+# =============================================================================
+# THE CAPSTONE PLAYBOOK. Section 4.3.
+#
+# This is the playbook that brings up the entire branch office from scratch.
+# Every role you've built today, every host group you've configured, every
+# pattern you've learned — composed into a single "ansible-playbook site.yml"
+# command that builds the complete environment.
+#
+# Site.yml is a conventional Ansible name. In the same way that Makefile is
+# the canonical name for "the build entry point," site.yml is the canonical
+# name for "the entry point that brings up the whole site." When someone
+# clones an Ansible repo, they expect to find a site.yml at the top level
+# that does The Whole Thing.
+#
+# The play ordering is intentional:
+#
+#   1. webserver role on the web tier — install nginx, deploy templated content
+#   2. windows-mgmt role on the management host — Chocolatey tools, users, share
+#   3. hardening role on EVERYTHING — apply the security baseline last so
+#      it covers anything the earlier roles changed
+#
+# Run it:
+#     ansible-playbook playbooks/site.yml
+#
+# This is the command that "builds the branch office." If a hurricane took
+# out the lab and you had to rebuild every host from scratch, this single
+# command — pointed at fresh inventory — would do it.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Phase 1: Linux web tier
+# -----------------------------------------------------------------------------
+- name: "Phase 1: Configure the Linux web tier"
+  hosts: webservers
+  become: true
+
+  roles:
+    - webserver
+
+# -----------------------------------------------------------------------------
+# Phase 2: Windows management host
+# -----------------------------------------------------------------------------
+- name: "Phase 2: Configure the Windows management host"
+  hosts: mgmt1
+
+  roles:
+    - windows-mgmt
+
+# -----------------------------------------------------------------------------
+# Phase 3: Cross-platform hardening (applied to EVERYTHING last)
+# -----------------------------------------------------------------------------
+# The hardening role detects the OS family of each host and applies the
+# appropriate baseline. Because it runs last, it can lock down anything
+# the earlier roles configured (e.g., the SMB firewall rule that
+# windows-mgmt opened still works because hardening doesn't override it).
+- name: "Phase 3: Apply baseline hardening to all branch office hosts"
+  hosts: branch_office
+  gather_facts: true
+
+  roles:
+    - hardening

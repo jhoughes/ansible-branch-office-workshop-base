@@ -1,0 +1,23 @@
+---
+# =============================================================================
+# playbooks/05-harden.yml
+# =============================================================================
+# Applies the cross-platform hardening role to every host in the branch
+# office (both Linux and Windows). The role detects which OS family it's
+# running on and dispatches to the appropriate task file.
+#
+# This playbook IS the demo for "one role, two operating systems, one
+# command, consistent baseline." That framing matters for the audience —
+# it's the moment they realize Ansible isn't just for Linux *or* Windows,
+# it's for *infrastructure*, regardless of OS.
+#
+# Run it:
+#     ansible-playbook playbooks/05-harden.yml
+# =============================================================================
+
+- name: Apply baseline hardening to all branch office hosts
+  hosts: branch_office
+  gather_facts: true   # the role uses ansible_facts.os_family for dispatch
+
+  roles:
+    - hardening

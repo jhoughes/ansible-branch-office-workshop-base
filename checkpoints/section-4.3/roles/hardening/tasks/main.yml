@@ -1,0 +1,24 @@
+---
+# =============================================================================
+# roles/hardening/tasks/main.yml
+# =============================================================================
+# Cross-platform hardening role. Detects whether the target host is a Linux
+# or a Windows host and dispatches to the appropriate OS-specific task file.
+#
+# This is the canonical pattern for cross-platform roles in Ansible:
+#   - main.yml is the dispatcher
+#   - linux.yml / windows.yml are the OS-specific implementations
+#   - The role's defaults/main.yml has variables that apply to both
+#
+# Adapted from the structural pattern in chapter 12 of "Ansible: Up and Running"
+# (3rd edition) and the geerlingguy/ansible-for-devops security/main.yml
+# example, with Windows additions for the workshop's hybrid scenario.
+# =============================================================================
+
+- name: Apply Linux hardening tasks
+  ansible.builtin.include_tasks: linux.yml
+  when: ansible_facts.os_family in ['Debian', 'RedHat']
+
+- name: Apply Windows hardening tasks
+  ansible.builtin.include_tasks: windows.yml
+  when: ansible_facts.os_family == 'Windows'

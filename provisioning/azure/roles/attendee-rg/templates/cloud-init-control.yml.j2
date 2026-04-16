@@ -1,0 +1,124 @@
+#cloud-config
+# =============================================================================
+# cloud-init configuration for the attendee control node
+# =============================================================================
+# This file is rendered per-attendee by the attendee-rg role and passed to the
+# Azure VM via the custom_data parameter. cloud-init runs it on first boot
+# and bakes the result into the image.
+#
+# Goals:
+#   1. Install Ansible (system package, not pip — pip on Ubuntu is a mess)
+#   2. Install Python deps for the azure.azcollection and pywinrm
+#   3. Clone the workshop repo into /home/{{ attendee_ssh_username }}/workshop
+#   4. Set ownership so the attendee can edit files
+#   5. Pre-install ansible-galaxy collections that the workshop needs
+#
+# Anything that would require running playbooks against the lab itself goes in
+# the workshop's own preflight/check.yml playbook, NOT here. Cloud-init is for
+# bootstrapping the control node, not the entire lab.
+# =============================================================================
+
+package_update: true
+package_upgrade: false   # don't waste 10 minutes patching on first boot
+
+packages:
+  - ansible
+  - python3-pip
+  - python3-venv
+  - git
+  - jq
+  - tree
+  - vim
+  - nano
+  - tmux
+  - htop
+  - sshpass        # used by some Ansible modules and the workshop's lab guides
+
+write_files:
+  # A small README in the attendee's home directory pointing them at the workshop
+  - path: /home/{{ attendee_ssh_username }}/README.txt
+    permissions: '0644'
+    content: |
+      Welcome to the Ansible Branch Office Workshop!
+
+      The workshop repository is at:
+        ~/workshop
+
+      Get started:
+        cd ~/workshop
+        ansible-playbook preflight/check.yml
+
+      Your instructor will walk you through the rest. If you fall behind
+      during a section, look in checkpoints/section-X.Y/ for a complete
+      working snapshot.
+
+      Have fun!
+
+  # An ansible.cfg fragment in the attendee's home that ensures the workshop's
+  # cfg is picked up. The workshop's own ansible.cfg in the repo root takes
+  # precedence when ansible-playbook is run from inside the repo, but having
+  # this here means ansible commands run from the home directory still work.
+  - path: /home/{{ attendee_ssh_username }}/.ansible.cfg
+    permissions: '0644'
+    content: |
+      [defaults]
+      host_key_checking = False
+      stdout_callback = yaml
+      interpreter_python = auto_silent
+
+  # /etc/hosts entries for the lab hosts. This is what makes the workshop's
+  # inventory file (inventory/hosts.yml) work — it references hosts by short
+  # name (web1, web2, mgmt1) and relies on /etc/hosts to resolve them to the
+  # per-attendee private IPs (10.<attendee_number>.0.X). Without these entries,
+  # every Ansible task targeting web1/web2/mgmt1 would fail with a DNS error.
+  #
+  # Appended to /etc/hosts via the append_hosts directive below, not written
+  # as a standalone file, because cloud-init's write_files would clobber the
+  # default Ubuntu /etc/hosts entries (localhost, etc.) if we wrote the
+  # whole file here.
+  - path: /etc/hosts.workshop-additions
+    permissions: '0644'
+    content: |
+      # Workshop lab host entries — written by cloud-init at provisioning time.
+      # See inventory/hosts.yml in the workshop repo for how these are used.
+      {{ host_private_ips.web1 }}   web1
+      {{ host_private_ips.web2 }}   web2
+      {{ host_private_ips.mgmt1 }}  mgmt1
+
+runcmd:
+  # Install pywinrm so the workshop's playbooks can talk to the Windows host.
+  # We use pip with --break-system-packages because Ubuntu 22.04+ marks the
+  # system Python as externally managed. This is the lab; production should
+  # use a venv.
+  - pip3 install --break-system-packages "pywinrm[kerberos]" requests
+
+  # Install the workshop's required Galaxy collections from requirements.yml.
+  # The requirements file is the canonical source of truth for which
+  # collections (and which versions) the workshop needs. See requirements.yml
+  # at the repo root for the full list and rationale.
+  #
+  # Note: we clone the repo first (next runcmd block), then install collections
+  # from the requirements.yml file inside the clone. This ordering is important
+  # — running this collection install before the clone would fail because
+  # requirements.yml wouldn't exist yet.
+  - sudo -u {{ attendee_ssh_username }} git clone --branch {{ workshop_repo_branch }} {{ workshop_repo_url }} /home/{{ attendee_ssh_username }}/workshop
+  - sudo -u {{ attendee_ssh_username }} ansible-galaxy collection install -r /home/{{ attendee_ssh_username }}/workshop/requirements.yml
+
+  # Make sure the workshop directory is owned correctly even if anything above
+  # ran as root by mistake.
+  - chown -R {{ attendee_ssh_username }}:{{ attendee_ssh_username }} /home/{{ attendee_ssh_username }}/workshop
+
+  # Append the workshop's lab host entries to /etc/hosts so the workshop
+  # inventory's short hostnames (web1, web2, mgmt1) resolve correctly.
+  - cat /etc/hosts.workshop-additions >> /etc/hosts
+
+  # Drop a marker file so the preflight playbook can confirm cloud-init finished.
+  - touch /var/lib/cloud/instance/workshop-bootstrap-complete
+
+# Make sure the attendee can sudo without a password (lab convenience, not production).
+# This is on top of cloud-init's default behavior of giving the admin_username sudo rights.
+bootcmd:
+  - echo "{{ attendee_ssh_username }} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/90-{{ attendee_ssh_username }}-nopasswd
+  - chmod 0440 /etc/sudoers.d/90-{{ attendee_ssh_username }}-nopasswd
+
+final_message: "Workshop control node bootstrap complete in $UPTIME seconds. Ready for attendee."
